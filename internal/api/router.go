@@ -649,6 +649,7 @@ func parseEpgHandler(w http.ResponseWriter, r *http.Request) {
 				ChannelID:   dbID,
 				Title:       e.Title,
 				Description: e.Description,
+				PosterURL:   e.PosterURL,
 				StartTime:   e.StartTime.Format(time.RFC3339),
 				EndTime:     e.EndTime.Format(time.RFC3339),
 			})

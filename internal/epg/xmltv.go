@@ -39,6 +39,7 @@ type Entry struct {
 	ChannelID   string    `json:"channel_id"`
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
+	PosterURL   string    `json:"poster_url"`
 	StartTime   time.Time `json:"start_time"`
 	EndTime     time.Time `json:"end_time"`
 }
@@ -75,10 +76,16 @@ func parseXMLTVContent(data []byte) ([]Entry, error) {
 			continue
 		}
 
+		var posterURL string
+		if p.Icon != nil {
+			posterURL = p.Icon.Src
+		}
+
 		entries = append(entries, Entry{
 			ChannelID:   p.ChannelID,
 			Title:       p.Title,
 			Description: p.Description,
+			PosterURL:   posterURL,
 			StartTime:   start,
 			EndTime:     end,
 		})

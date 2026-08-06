@@ -107,7 +107,7 @@ export default function EpgGrid() {
         <div key={ch.id} className="flex group hover:bg-neutral-900/30 transition-colors border-b border-neutral-800/30 h-20">
           {/* Channel Header (Sticky Left) */}
           <div className="w-24 h-20 shrink-0 bg-neutral-950 group-hover:bg-neutral-900 sticky left-0 z-20 flex items-center justify-center border-r border-neutral-800 shadow-lg p-1">
-            <Link to={`/player/${ch.id}`} className="flex items-center justify-center w-full h-full group/link" title={ch.name}>
+            <Link to={`/player/${ch.id}`} state={{ from: '/guide' }} className="flex items-center justify-center w-full h-full group/link" title={ch.name}>
               {ch.logo_url ? (
                 <img src={ch.logo_url} alt={ch.name} className="w-full h-full object-contain rounded" />
               ) : (
@@ -154,7 +154,7 @@ export default function EpgGrid() {
 
               const Wrapper: any = isActive ? Link : 'button';
               const wrapperProps: any = isActive 
-                ? { to: `/player/${ch.id}` }
+                ? { to: `/player/${ch.id}`, state: { from: '/guide' } }
                 : { onClick: () => setSelectedProgram({ entry: e, channel: ch }) };
 
               return (

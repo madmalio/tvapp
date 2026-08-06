@@ -64,6 +64,7 @@ func migrate() error {
 	
 	// Best-effort migration for existing DB
 	_, _ = conn.Exec(`ALTER TABLE channels ADD COLUMN tvg_id TEXT`)
+	_, _ = conn.Exec(`ALTER TABLE epg_entries ADD COLUMN poster_url TEXT`)
 	
 	log.Println("database migrated")
 	return nil
@@ -147,6 +148,7 @@ type EPGEntryRow struct {
 	ChannelID   int       `json:"channel_id"`
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
+	PosterURL   string    `json:"poster_url"`
 	StartTime   string    `json:"start_time"`
 	EndTime     string    `json:"end_time"`
 }
@@ -163,14 +165,14 @@ func SaveEPGEntries(entries []EPGEntryRow) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO epg_entries(channel_id, title, description, start_time, end_time) VALUES(?, ?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT INTO epg_entries(channel_id, title, description, poster_url, start_time, end_time) VALUES(?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
 	for _, e := range entries {
-		if _, err := stmt.Exec(e.ChannelID, e.Title, e.Description, e.StartTime, e.EndTime); err != nil {
+		if _, err := stmt.Exec(e.ChannelID, e.Title, e.Description, e.PosterURL, e.StartTime, e.EndTime); err != nil {
 			return err
 		}
 	}
@@ -179,7 +181,7 @@ func SaveEPGEntries(entries []EPGEntryRow) error {
 }
 
 func GetEPGEntries(channelID int) ([]EPGEntryRow, error) {
-	rows, err := conn.Query(`SELECT id, channel_id, title, COALESCE(description,''), start_time, end_time FROM epg_entries WHERE channel_id = ? ORDER BY start_time ASC`, channelID)
+	rows, err := conn.Query(`SELECT id, channel_id, title, COALESCE(description,''), COALESCE(poster_url,''), start_time, end_time FROM epg_entries WHERE channel_id = ? ORDER BY start_time ASC`, channelID)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +190,7 @@ func GetEPGEntries(channelID int) ([]EPGEntryRow, error) {
 	var out []EPGEntryRow
 	for rows.Next() {
 		var e EPGEntryRow
-		if err := rows.Scan(&e.ID, &e.ChannelID, &e.Title, &e.Description, &e.StartTime, &e.EndTime); err != nil {
+		if err := rows.Scan(&e.ID, &e.ChannelID, &e.Title, &e.Description, &e.PosterURL, &e.StartTime, &e.EndTime); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -197,7 +199,7 @@ func GetEPGEntries(channelID int) ([]EPGEntryRow, error) {
 }
 
 func GetAllEPGEntries() ([]EPGEntryRow, error) {
-	rows, err := conn.Query(`SELECT id, channel_id, title, COALESCE(description,''), start_time, end_time FROM epg_entries ORDER BY channel_id, start_time ASC`)
+	rows, err := conn.Query(`SELECT id, channel_id, title, COALESCE(description,''), COALESCE(poster_url,''), start_time, end_time FROM epg_entries ORDER BY channel_id, start_time ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +208,7 @@ func GetAllEPGEntries() ([]EPGEntryRow, error) {
 	var out []EPGEntryRow
 	for rows.Next() {
 		var e EPGEntryRow
-		if err := rows.Scan(&e.ID, &e.ChannelID, &e.Title, &e.Description, &e.StartTime, &e.EndTime); err != nil {
+		if err := rows.Scan(&e.ID, &e.ChannelID, &e.Title, &e.Description, &e.PosterURL, &e.StartTime, &e.EndTime); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -216,7 +218,7 @@ func GetAllEPGEntries() ([]EPGEntryRow, error) {
 
 func GetEPGEntriesByTime(start string, end string) ([]EPGEntryRow, error) {
 	// epg_entries.end_time > start AND epg_entries.start_time < end
-	rows, err := conn.Query(`SELECT id, channel_id, title, COALESCE(description,''), start_time, end_time FROM epg_entries WHERE end_time > ? AND start_time < ? ORDER BY channel_id, start_time ASC`, start, end)
+	rows, err := conn.Query(`SELECT id, channel_id, title, COALESCE(description,''), COALESCE(poster_url,''), start_time, end_time FROM epg_entries WHERE end_time > ? AND start_time < ? ORDER BY channel_id, start_time ASC`, start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +227,7 @@ func GetEPGEntriesByTime(start string, end string) ([]EPGEntryRow, error) {
 	var out []EPGEntryRow
 	for rows.Next() {
 		var e EPGEntryRow
-		if err := rows.Scan(&e.ID, &e.ChannelID, &e.Title, &e.Description, &e.StartTime, &e.EndTime); err != nil {
+		if err := rows.Scan(&e.ID, &e.ChannelID, &e.Title, &e.Description, &e.PosterURL, &e.StartTime, &e.EndTime); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

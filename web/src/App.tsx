@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
 import ChannelList from "./components/ChannelList";
 import EpgGrid from "./components/EpgGrid";
@@ -6,9 +6,12 @@ import VideoPlayer from "./components/VideoPlayer";
 import Settings from "./components/Settings";
 
 export default function App() {
+  const location = useLocation();
+  const isPlayer = location.pathname.startsWith('/player');
+
   return (
     <div className="relative h-screen w-screen bg-neutral-950 text-white overflow-hidden">
-      <Sidebar />
+      {!isPlayer && <Sidebar />}
       <main className="absolute inset-0 flex flex-col min-w-0">
         <Routes>
           <Route path="/channels" element={<ChannelList />} />
