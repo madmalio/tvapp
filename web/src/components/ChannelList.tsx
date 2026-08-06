@@ -1,9 +1,14 @@
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo, useRef, startTransition } from "react";
 import { Link } from "react-router-dom";
-import { Play, ChevronLeft, ChevronRight } from "lucide-react";
+import { Play, ChevronLeft, ChevronRight, Tv } from "lucide-react";
+import { getApiUrl } from "../lib/api";
+import { useApi } from "../hooks/useApi";
+
+type Source = { id: number; name: string; type: string; url: string; epg_url: string; };
 
 type Channel = {
   id: number;
+  source_id: number;
   name: string;
   stream_url: string;
   logo_url?: string;
@@ -108,38 +113,58 @@ function ChannelCarousel({ groupName, channels, onHover }: { groupName: string; 
 }
 
 export default function ChannelList() {
+  const { data: sources } = useApi<Source[]>('/api/sources');
+  const [activeSourceId, setActiveSourceId] = useState<number | null>(null);
+
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/channels")
+    fetch(getApiUrl("/api/channels"))
       .then((r) => r.json())
       .then((data) => {
-        setChannels(data);
+        setChannels(data || []);
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (sources && sources.length > 0 && activeSourceId === null) {
+      setActiveSourceId(sources[0].id);
+    }
+  }, [sources, activeSourceId]);
+
   const [activeCategory, setActiveCategory] = useState<string>('All');
 
+  const sourceChannels = useMemo(() => {
+    if (!activeSourceId) return [];
+    return channels.filter(c => c.source_id === activeSourceId);
+  }, [channels, activeSourceId]);
+
   const { heroChannel, filteredChannels, availableCategories } = useMemo(() => {
-    if (channels.length === 0) return { heroChannel: null, filteredChannels: [], availableCategories: [] };
-    const hero = channels.find(c => c.logo_url) || channels[0];
+    if (sourceChannels.length === 0) return { heroChannel: null, filteredChannels: [], availableCategories: [] };
     
     const present = new Set<string>();
     present.add('All');
-    channels.forEach(ch => present.add(mapCategory(ch.group_title || "")));
+    sourceChannels.forEach(ch => present.add(mapCategory(ch.group_title || "")));
     const avail = CATEGORIES.filter(cat => present.has(cat));
     
     const filtered = activeCategory === 'All' 
-      ? channels 
-      : channels.filter(ch => mapCategory(ch.group_title || "") === activeCategory);
+      ? sourceChannels 
+      : sourceChannels.filter(ch => mapCategory(ch.group_title || "") === activeCategory);
       
+    const hero = filtered.find(c => c.logo_url) || filtered[0];
+    
     return { heroChannel: hero, filteredChannels: filtered, availableCategories: avail };
-  }, [channels, activeCategory]);
+  }, [sourceChannels, activeCategory]);
 
   const [hoveredChannel, setHoveredChannel] = useState<Channel | null>(null);
+  
+  useEffect(() => {
+    setHoveredChannel(null);
+  }, [activeSourceId, activeCategory]);
+
   const [heroProgram, setHeroProgram] = useState<EPGEntry | null>(null);
   const [isFetchingProgram, setIsFetchingProgram] = useState(true);
   const [heroReady, setHeroReady] = useState(false);
@@ -153,14 +178,24 @@ export default function ChannelList() {
   const activeHeroChannel = hoveredChannel || heroChannel;
 
   useEffect(() => {
+    if (!loading && channels.length === 0) {
+      setHeroReady(true);
+      return;
+    }
+    if (!loading && sourceChannels.length === 0) {
+      setHeroReady(true);
+      return;
+    }
+    
     if (!activeHeroChannel) return;
+
     setIsFetchingProgram(true);
     
     const now = new Date();
     const start = new Date(now.getTime() - 1 * 60 * 60 * 1000).toISOString();
     const end = new Date(now.getTime() + 1 * 60 * 60 * 1000).toISOString();
     
-    fetch(`/api/epg?start=${start}&end=${end}`)
+    fetch(getApiUrl(`/api/epg?start=${start}&end=${end}`))
       .then(r => r.json())
       .then(async (data: EPGEntry[]) => {
         if (!data || data.length === 0) {
@@ -191,7 +226,7 @@ export default function ChannelList() {
         setIsFetchingProgram(false);
         setHeroReady(true);
       });
-  }, [activeHeroChannel]);
+  }, [activeHeroChannel, loading, channels.length, sourceChannels.length]);
 
   if (loading || !heroReady) {
     return (
@@ -222,22 +257,43 @@ export default function ChannelList() {
 
   return (
     <div className="flex-1 overflow-y-auto overflow-x-hidden relative no-scrollbar animate-in fade-in duration-500">
+      
+      {/* Top Source Tabs */}
+      {sources && sources.length > 1 && (
+        <div className="absolute top-0 left-0 right-0 z-50 px-24 py-4 flex gap-2">
+          {sources.map(src => (
+            <button
+              key={src.id}
+              onClick={() => startTransition(() => setActiveSourceId(src.id))}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors backdrop-blur-md border ${
+                activeSourceId === src.id 
+                  ? 'bg-blue-600/90 text-white border-blue-500 shadow-[0_0_15px_rgba(37,99,235,0.5)]' 
+                  : 'bg-neutral-900/50 text-neutral-400 border-neutral-800 hover:text-white hover:bg-neutral-800'
+              }`}
+            >
+              <Tv className="w-4 h-4" />
+              {src.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Hero Section */}
       {activeHeroChannel && (
         <div className="relative h-[65vh] min-h-[500px] w-full flex items-end pb-16 pr-8 md:pr-12 pl-24 md:pl-28 shrink-0 overflow-hidden">
           
           {/* Background Image / Ambient Gradients */}
           <div className="absolute inset-0 bg-neutral-950 overflow-hidden">
-            {(!isFetchingProgram && !heroProgram?.poster_url) && (
+            {(!isFetchingProgram && !(heroProgram?.poster_url || activeHeroChannel.logo_url)) && (
               <>
                 <div className="absolute -top-[20%] -left-[10%] w-[60%] h-[80%] rounded-full bg-blue-900/30 blur-[120px] mix-blend-screen" />
                 <div className="absolute top-[20%] -right-[10%] w-[50%] h-[70%] rounded-full bg-purple-900/20 blur-[100px] mix-blend-screen" />
               </>
             )}
 
-            {heroProgram?.poster_url && (
+            {(heroProgram?.poster_url || activeHeroChannel.logo_url) && (
               <img 
-                src={heroProgram.poster_url} 
+                src={heroProgram?.poster_url || activeHeroChannel.logo_url} 
                 alt="Poster" 
                 className="absolute inset-0 w-full h-full object-cover object-top opacity-60 transition-none"
                 loading="eager"

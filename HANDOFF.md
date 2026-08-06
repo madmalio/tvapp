@@ -11,11 +11,19 @@ Core PlutoTV M3U playback is functional. Key challenges resolved:
 - AES-128 key file retrieval (16-byte keys now fetch correctly)
 - Manifest refresh and session expiry (proactive detection + auto-recovery)
 
-EPG (Live TV Guide) is fully integrated:
+Multi-Source Architecture is fully integrated:
+- Supports unlimited M3U playlists and HDHomeRun tuners side-by-side.
+- Database utilizes `source_id` foreign keys to track channels and EPG entries by source.
+- UI implements horizontal Source Tabs allowing users to instantly switch between active tuners.
+- Backend DB wipes are now disabled so all configured sources persist permanently across server restarts.
+
+EPG (Live TV Guide) and Channel List improvements:
 - XMLTV parsing maps to M3U PlutoTV channels.
 - High-performance, heavily memoized React grid handles thousands of program nodes.
 - Infinite horizontal scroll implemented via time-windowed SQL queries.
+- Vertical infinite scroll implemented via `visibleRows` state, ensuring instantaneous tab switching.
 - Raw M3U group titles are dynamically mapped into simplified categories (Movies, News, Kids, etc.).
+- Channel Hero image caches are robust, falling back to channel logos when EPG posters are missing.
 
 ## Architecture
 

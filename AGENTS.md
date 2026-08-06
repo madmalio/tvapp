@@ -69,6 +69,8 @@ tvapp/
 ## Key Patterns
 
 - **API routes** use chi router in `router.go`
+- **Multi-Source Architecture** uses `source_id` foreign keys for `channels` and `epg_entries`. The frontend organizes content by `activeSourceId` in horizontal tabs.
+- **Settings Dashboard** supports full CRUD operations for multiple M3U, XMLTV, and HDHomeRun sources.
 - **CORS** is handled per-route via `corsMiddleware`
 - **HLS proxying** happens through `/api/proxy` endpoint (playlist-only proxy + segment proxying)
 - **FFmpeg** is used for non-HLS streams via `/api/stream/start` (kept as fallback)
@@ -76,9 +78,11 @@ tvapp/
 - **M3U refresh** is lazy — re-fetches every 15 min on channel click
 - **Variant cache** stores resolved variant URLs to skip master re-resolution
 - **Auto-recovery** on hls.js fatal errors (3 attempts, 2s delay, live edge resume)
+- **Player State** resets `isAtLiveEdge` and `isPlaying` correctly on channel switches.
 - **EPG Grid Rendering** is heavily memoized (`useMemo`) to prevent thousands of DOM nodes from re-rendering on state changes (like opening modals). ALWAYS place hooks at the top level of `EpgGrid.tsx` to avoid "Rules of Hooks" violations.
-- **EPG Infinite Scroll** dynamically appends 2-hour blocks to the grid width, querying the backend dynamically using time-windowed SQL queries.
+- **EPG Infinite Scroll (Horizontal/Vertical)** dynamically appends 2-hour blocks to the grid width. It also uses a `visibleRows` state with `startTransition` to implement vertical lazy rendering, ensuring tuner switches are instantaneous.
 - **EPG Category Mapping** normalizes messy M3U `group_title` values into 9 fixed buckets (Movies, News, Sports, etc.) on the frontend.
+- **Hero Fallbacks**: The channel list Hero defaults to the first available channel in the current category. Posters fall back to the channel `logo_url` if the EPG program lacks an `<icon src>`.
 
 ## Known PlutoTV Constraints
 

@@ -1,8 +1,14 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, startTransition } from "react";
 import { Link } from "react-router-dom";
+import { getApiUrl } from "../lib/api";
+import { useApi } from "../hooks/useApi";
+import { Tv } from "lucide-react";
+
+type Source = { id: number; name: string; type: string; url: string; epg_url: string; };
 
 type Channel = {
   id: number;
+  source_id: number;
   name: string;
   logo_url?: string;
   group_title: string;
@@ -36,11 +42,30 @@ function mapCategory(rawGroup: string): string {
 }
 
 export default function EpgGrid() {
+  const { data: sources } = useApi<Source[]>('/api/sources');
+  const [activeSourceId, setActiveSourceId] = useState<number | null>(null);
+
   const [channels, setChannels] = useState<Channel[]>([]);
   const [entries, setEntries] = useState<EPGEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedProgram, setSelectedProgram] = useState<{ entry: EPGEntry, channel: Channel } | null>(null);
   const [activeCategory, setActiveCategory] = useState<string>('All');
+  const [visibleRows, setVisibleRows] = useState(20);
+
+  useEffect(() => {
+    setVisibleRows(20);
+  }, [activeSourceId, activeCategory]);
+
+  useEffect(() => {
+    if (sources && sources.length > 0 && activeSourceId === null) {
+      setActiveSourceId(sources[0].id);
+    }
+  }, [sources, activeSourceId]);
+
+  const sourceChannels = useMemo(() => {
+    if (!activeSourceId) return [];
+    return channels.filter(c => c.source_id === activeSourceId);
+  }, [channels, activeSourceId]);
 
   // Calculate the current time position (updates every minute)
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -63,8 +88,8 @@ export default function EpgGrid() {
     const end = new Date(now.getTime() + (durationHours - 2) * 60 * 60 * 1000).toISOString();
 
     Promise.all([
-      fetch("/api/channels").then(r => r.json()),
-      fetch(`/api/epg?start=${start}&end=${end}`).then(r => r.json())
+      fetch(getApiUrl("/api/channels")).then(r => r.json()),
+      fetch(getApiUrl(`/api/epg?start=${start}&end=${end}`)).then(r => r.json())
     ]).then(([chData, epgData]) => {
       setChannels(chData || []);
       setEntries(epgData || []);
@@ -96,10 +121,10 @@ export default function EpgGrid() {
 
   const gridContent = useMemo(() => {
     const filteredChannels = activeCategory === 'All' 
-      ? channels 
-      : channels.filter(ch => mapCategory(ch.group_title) === activeCategory);
+      ? sourceChannels 
+      : sourceChannels.filter(ch => mapCategory(ch.group_title) === activeCategory);
 
-    return filteredChannels.map((ch) => {
+    return filteredChannels.slice(0, visibleRows).map((ch) => {
       const chEntries = epgByChannel[ch.id] || [];
       if (chEntries.length === 0) return null; // Hide channels with no EPG data
 
@@ -183,14 +208,14 @@ export default function EpgGrid() {
         </div>
       );
     });
-  }, [channels, epgByChannel, gridStartTime, currentTime, currentTimeOffset, durationHours, activeCategory]);
+  }, [sourceChannels, epgByChannel, gridStartTime, currentTime, currentTimeOffset, durationHours, activeCategory, visibleRows]);
 
   const availableCategories = useMemo(() => {
     const present = new Set<string>();
     present.add('All');
-    channels.forEach(ch => present.add(mapCategory(ch.group_title)));
+    sourceChannels.forEach(ch => present.add(mapCategory(ch.group_title)));
     return CATEGORIES.filter(cat => present.has(cat));
-  }, [channels]);
+  }, [sourceChannels]);
 
   if (loading) {
     return (
@@ -227,30 +252,57 @@ export default function EpgGrid() {
   });
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const { scrollLeft, scrollWidth, clientWidth } = e.currentTarget;
+    const { scrollLeft, scrollWidth, clientWidth, scrollTop, scrollHeight, clientHeight } = e.currentTarget;
     if (scrollLeft + clientWidth >= scrollWidth - 100) {
       setDurationHours(prev => Math.min(prev + 2, 24)); // add 2 hours when reaching the end, cap at 24
+    }
+    if (scrollTop + clientHeight >= scrollHeight - 500) {
+      setVisibleRows(prev => prev + 20); // render more rows as we scroll down
     }
   };
 
   return (
-    <div className="flex-1 flex flex-col pl-20 bg-neutral-950 overflow-hidden h-full">
-      <div className="p-6 pb-4 shrink-0 flex flex-col gap-4">
-        <h2 className="text-2xl font-bold text-white tracking-tight">Live TV Guide</h2>
-        <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
-          {availableCategories.map(cat => (
+    <div className="flex-1 flex flex-col pl-20 bg-neutral-950 overflow-hidden h-full relative">
+      
+      {/* Top Source Tabs */}
+      {sources && sources.length > 1 && (
+        <div className="absolute top-0 left-0 right-0 z-50 pl-24 pr-6 py-4 flex gap-2">
+          {sources.map(src => (
             <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
-                activeCategory === cat 
-                  ? 'bg-blue-600 text-white' 
-                  : 'bg-neutral-800/50 text-neutral-400 hover:text-white hover:bg-neutral-800'
+              key={src.id}
+              onClick={() => startTransition(() => setActiveSourceId(src.id))}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors backdrop-blur-md border ${
+                activeSourceId === src.id 
+                  ? 'bg-blue-600/90 text-white border-blue-500 shadow-[0_0_15px_rgba(37,99,235,0.5)]' 
+                  : 'bg-neutral-900/50 text-neutral-400 border-neutral-800 hover:text-white hover:bg-neutral-800'
               }`}
             >
-              {cat}
+              <Tv className="w-4 h-4" />
+              {src.name}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Main UI Header with Categories */}
+      <div className={`shrink-0 border-b border-neutral-800/80 bg-neutral-900/40 backdrop-blur-md pl-24 z-40 relative flex items-center pr-6 overflow-x-auto no-scrollbar shadow-md ${sources && sources.length > 1 ? 'mt-16' : ''}`}>
+        <div className="p-6 pb-4 shrink-0 flex flex-col gap-4">
+          <h2 className="text-2xl font-bold text-white tracking-tight">Live TV Guide</h2>
+          <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
+            {availableCategories.map(cat => (
+              <button
+                key={cat}
+                onClick={() => setActiveCategory(cat)}
+                className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
+                  activeCategory === cat 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-neutral-800/50 text-neutral-400 hover:text-white hover:bg-neutral-800'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       

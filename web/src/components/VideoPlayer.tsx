@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { ArrowLeft, Menu, X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, History } from "lucide-react";
 import Hls from "hls.js";
+import { getApiUrl } from "../lib/api";
 
 type ChannelInfo = {
   id: number;
@@ -81,13 +82,13 @@ export default function VideoPlayer() {
 
   const getProxyUrl = useCallback(() => {
     if (!channel) return "";
-    return `/api/proxy?url=${encodeURIComponent(channel.stream_url)}`;
+    return getApiUrl(`/api/proxy?url=${encodeURIComponent(channel.stream_url)}`);
   }, [channel]);
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/channels').then(r => r.json()),
-      fetch(`/api/epg?start=${new Date(Date.now() - 3600000).toISOString()}&end=${new Date(Date.now() + 3600000).toISOString()}`).then(r => r.json())
+      fetch(getApiUrl('/api/channels')).then(r => r.json()),
+      fetch(getApiUrl(`/api/epg?start=${new Date(Date.now() - 3600000).toISOString()}&end=${new Date(Date.now() + 3600000).toISOString()}`)).then(r => r.json())
     ])
     .then(([allCh, epgData]) => {
       setAllChannels(allCh);
@@ -109,6 +110,8 @@ export default function VideoPlayer() {
     if (!channelId) return;
     reloadAttemptsRef.current = 0;
     positionRef.current = 0;
+    setIsAtLiveEdge(true);
+    setIsPlaying(true);
     
     if (allChannels.length > 0) {
       const ch = allChannels.find(c => c.id === parseInt(channelId));
@@ -124,7 +127,7 @@ export default function VideoPlayer() {
       }
     }
     
-    fetch(`/api/channels/${channelId}`)
+    fetch(getApiUrl(`/api/channels/${channelId}`))
       .then(r => r.json())
       .then(ch => {
         setChannel(prev => prev?.id === ch.id ? prev : ch);
@@ -199,7 +202,7 @@ export default function VideoPlayer() {
             // Fetch fresh session token before restarting
             setTimeout(() => {
               if (!channelId) return;
-              fetch(`/api/channels/${channelId}?force=true`)
+              fetch(getApiUrl(`/api/channels/${channelId}?force=true`))
                 .then((r) => r.json())
                 .then((ch) => setChannel(ch))
                 .catch(() => startPlayback(v, getProxyUrl())); // Fallback to current URL if fetch fails
@@ -313,6 +316,35 @@ export default function VideoPlayer() {
       ? allChannels 
       : allChannels.filter(ch => mapCategory(ch.group_title || "") === activeCategory);
   }, [allChannels, activeCategory]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!channelId || filteredChannels.length === 0) return;
+        
+        const currentIndex = filteredChannels.findIndex(ch => ch.id === parseInt(channelId));
+        if (currentIndex === -1) return;
+
+        let newIndex = currentIndex;
+        if (e.key === 'ArrowUp') {
+          newIndex = currentIndex > 0 ? currentIndex - 1 : filteredChannels.length - 1;
+        } else if (e.key === 'ArrowDown') {
+          newIndex = currentIndex < filteredChannels.length - 1 ? currentIndex + 1 : 0;
+        }
+
+        const newChannel = filteredChannels[newIndex];
+        if (newChannel) {
+          navigate(`/player/${newChannel.id}`, {
+            state: { ...location.state, previousChannelId: channelId }
+          });
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [channelId, filteredChannels, navigate, location.state]);
 
   return (
     <div 

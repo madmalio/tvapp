@@ -21,7 +21,6 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"tvapp/internal/db"
-	"tvapp/internal/epg"
 	"tvapp/internal/hdhomerun"
 	"tvapp/internal/iptv"
 	"tvapp/internal/stream"
@@ -38,8 +37,10 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 	r.Get("/api/channels", listChannelsHandler)
 	r.Get("/api/channels/{id}", getChannelHandler)
 	r.Get("/api/proxy", proxyStreamHandler)
-	r.Post("/api/playlists/parse", parsePlaylistHandler)
-	r.Post("/api/epg/parse", parseEpgHandler)
+	r.Get("/api/sources", getSourcesHandler)
+	r.Post("/api/sources", addSourceHandler)
+	r.Put("/api/sources/{id}", updateSourceHandler)
+	r.Delete("/api/sources/{id}", deleteSourceHandler)
 	r.Get("/api/epg", getEpgHandler)
 	r.Post("/api/stream/start", startStreamHandler)
 	r.Delete("/api/stream/stop/{id}", stopStreamHandler)
@@ -123,24 +124,31 @@ func getChannelHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func refreshChannelIfStale(id int, force bool) (*db.ChannelRow, error) {
-	lastM3UMu.Lock()
-	needsRefresh := force || (time.Since(lastM3URefresh) > 15*time.Minute && lastM3UURL != "")
-	lastM3UMu.Unlock()
-
-	if !needsRefresh {
-		return db.GetChannel(id)
-	}
-
-	channels, err := iptv.ParseM3U(lastM3UURL)
-	if err != nil {
-		log.Printf("[m3u] refresh failed: %v, using stored data", err)
-		lastM3UMu.Lock()
-		lastM3URefresh = time.Now()
-		lastM3UMu.Unlock()
-		return db.GetChannel(id)
-	}
-
 	current, err := db.GetChannel(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// We no longer have a global lastM3URefresh because each source is parsed independently.
+	// We'll rely on the client specifying `force=true` (like when switching channels) 
+	// or we can track refresh times per source in the future.
+	// For now, if force is requested and it's an IPTV channel, we re-parse its source.
+	if !force || current.TunerType != "iptv" {
+		return current, nil
+	}
+
+	source, err := db.GetSource(current.SourceID)
+	if err != nil {
+		return current, nil
+	}
+
+	channels, err := iptv.ParseM3U(source.URL)
+	if err != nil {
+		log.Printf("[m3u] refresh failed for source %d: %v, using stored data", source.ID, err)
+		return current, nil
+	}
+
+	current, err = db.GetChannel(id)
 	if err != nil {
 		return nil, err
 	}
@@ -156,9 +164,6 @@ func refreshChannelIfStale(id int, force bool) (*db.ChannelRow, error) {
 		}
 	}
 
-	lastM3UMu.Lock()
-	lastM3URefresh = time.Now()
-	lastM3UMu.Unlock()
 	return current, nil
 }
 
@@ -166,9 +171,6 @@ const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
 
 var (
 	sharedCookieJar http.CookieJar
-	lastM3UURL      string
-	lastM3URefresh  time.Time
-	lastM3UMu       sync.Mutex
 )
 
 type variantCacheEntry struct {
@@ -561,112 +563,6 @@ func appendQuery(raw string, qs string) string {
 	return raw + "?" + qs
 }
 
-func parsePlaylistHandler(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		URL string `json:"url"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
-		return
-	}
-	if req.URL == "" {
-		http.Error(w, "url required", http.StatusBadRequest)
-		return
-	}
-
-	iptvChannels, err := iptv.ParseM3U(req.URL)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	lastM3UMu.Lock()
-	lastM3UURL = req.URL
-	lastM3URefresh = time.Now()
-	lastM3UMu.Unlock()
-	log.Printf("[m3u] loaded %d channels from %s", len(iptvChannels), req.URL)
-
-	rows := make([]db.ChannelRow, len(iptvChannels))
-	for i, ch := range iptvChannels {
-		rows[i] = db.ChannelRow{
-			Name:       ch.Name,
-			StreamURL:  ch.StreamURL,
-			LogoURL:    ch.LogoURL,
-			GroupTitle: ch.GroupTitle,
-			TunerType:  "iptv",
-			TvgID:      ch.TvgID,
-		}
-	}
-
-	if err := db.ClearChannels(); err != nil {
-		log.Printf("clear channels: %v", err)
-	}
-	if err := db.SaveChannels(rows); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	saved, _ := db.GetChannels()
-	json.NewEncoder(w).Encode(saved)
-}
-
-func parseEpgHandler(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		URL string `json:"url"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
-		return
-	}
-	if req.URL == "" {
-		http.Error(w, "url required", http.StatusBadRequest)
-		return
-	}
-
-	entries, err := epg.ParseXMLTV(req.URL)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	channels, err := db.GetChannels()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	channelMap := make(map[string]int)
-	for _, ch := range channels {
-		if ch.TvgID != "" {
-			channelMap[ch.TvgID] = ch.ID
-		}
-	}
-
-	rows := []db.EPGEntryRow{}
-	for _, e := range entries {
-		if dbID, ok := channelMap[e.ChannelID]; ok {
-			rows = append(rows, db.EPGEntryRow{
-				ChannelID:   dbID,
-				Title:       e.Title,
-				Description: e.Description,
-				PosterURL:   e.PosterURL,
-				StartTime:   e.StartTime.Format(time.RFC3339),
-				EndTime:     e.EndTime.Format(time.RFC3339),
-			})
-		}
-	}
-
-	if err := db.ClearEPGEntries(); err != nil {
-		log.Printf("clear epg entries: %v", err)
-	}
-	if err := db.SaveEPGEntries(rows); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	log.Printf("[epg] loaded %d entries from %s", len(rows), req.URL)
-	json.NewEncoder(w).Encode(rows)
-}
 
 func getEpgHandler(w http.ResponseWriter, r *http.Request) {
 	start := r.URL.Query().Get("start")
