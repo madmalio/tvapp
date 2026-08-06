@@ -19,6 +19,8 @@ import (
 
 type Session struct {
 	ID        string
+	TunerType string
+	Quality   string
 	Dir       string
 	URL       string
 	CreatedAt time.Time
@@ -75,21 +77,26 @@ func ffmpegHeaders(rawURL string) string {
 	return fmt.Sprintf("User-Agent: %s\r\nReferer: %s\r\nOrigin: %s\r\nCookie: %s\r\n", userAgent, referer, origin, cookieStr)
 }
 
-func Start(rawURL string) (*Session, error) {
+func Start(rawURL string, tunerType string, quality string) (*Session, error) {
 	id := fmt.Sprintf("stream_%d", time.Now().UnixNano())
 	dir := filepath.Join(os.TempDir(), "tvapp", id)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("mkdir: %w", err)
 	}
 
-	prefetchCookies(rawURL)
-	streamURL := resolveStreamURL(rawURL)
+	streamURL := rawURL
+	if tunerType != "hdhomerun" {
+		prefetchCookies(rawURL)
+		streamURL = resolveStreamURL(rawURL)
+	}
 	log.Printf("[stream] %s resolved URL: %s", id, streamURL)
 
 	sess := &Session{
 		ID:        id,
 		Dir:       dir,
 		URL:       streamURL,
+		TunerType: tunerType,
+		Quality:   quality,
 		CreatedAt: time.Now(),
 		LastUsed:  time.Now(),
 		ready:     make(chan struct{}),
@@ -196,29 +203,35 @@ func (s *Session) runLoop() {
 
 		streamURL := s.URL
 
+		videoArgs := []string{"-c:v", "copy"}
+		if s.TunerType == "hdhomerun" {
+			videoArgs = GetOptimalVideoArgs(s.Quality)
+		}
+
 		output := filepath.Join(s.Dir, "stream.m3u8")
 		headers := ffmpegHeaders(streamURL)
 		args := []string{
 			"-user_agent", userAgent,
 			"-headers", headers,
-			"-fflags", "+genpts",
 			"-err_detect", "ignore_err",
-			"-analyzeduration", "20M",
-			"-probesize", "20M",
+			"-analyzeduration", "1000000",
+			"-probesize", "1000000",
 			"-i", streamURL,
 			"-sn",
-			"-c:v", "copy",
+		}
+		args = append(args, videoArgs...)
+		args = append(args,
 			"-c:a", "aac",
 			"-b:a", "128k",
 			"-ac", "2",
-			"-hls_time", "5",
-			"-hls_list_size", "20",
-			"-hls_init_time", "5",
+			"-hls_time", "4",
+			"-hls_list_size", "15",
+			"-hls_init_time", "4",
 			"-hls_flags", "delete_segments+append_list+independent_segments",
 			"-loglevel", "warning",
 			"-y",
 			output,
-		}
+		)
 
 		cmd := exec.Command("ffmpeg", args...)
 		cmd.Dir = s.Dir

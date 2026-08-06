@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -18,9 +19,46 @@ type Device struct {
 	DeviceType    string `json:"device_type"`
 	DiscoverURL   string `json:"discover_url"`
 	LineupURL     string `json:"lineup_url"`
+	DeviceAuth    string `json:"device_auth"`
 }
 
 const discoverURL = "http://discover.hdhomerun.com/discover"
+
+// GetDeviceAuth fetches the discover.json directly from the device's local IP to get the DeviceAuth string
+func GetDeviceAuth(ctx context.Context, deviceIP string) (string, error) {
+	target := deviceIP
+	if !strings.HasPrefix(target, "http") {
+		target = "http://" + target
+	}
+	if !strings.HasSuffix(target, "discover.json") {
+		target = strings.TrimSuffix(target, "/") + "/discover.json"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return "", err
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("local discover request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var data struct {
+		DeviceAuth string `json:"DeviceAuth"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return "", fmt.Errorf("decode local discover: %w", err)
+	}
+
+	if data.DeviceAuth == "" {
+		return "", fmt.Errorf("device did not return DeviceAuth")
+	}
+
+	return data.DeviceAuth, nil
+}
 
 func Discover(ctx context.Context) ([]Device, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discoverURL, nil)

@@ -1,6 +1,7 @@
 package epg
 
 import (
+	"compress/gzip"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -37,6 +38,9 @@ type Program struct {
 
 type Entry struct {
 	ChannelID   string    `json:"channel_id"`
+	ChannelName string    `json:"channel_name"`
+	ChannelLogo string    `json:"channel_logo"`
+	Category    string    `json:"category"`
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
 	PosterURL   string    `json:"poster_url"`
@@ -45,13 +49,33 @@ type Entry struct {
 }
 
 func ParseXMLTV(rawURL string) ([]Entry, error) {
-	resp, err := http.Get(rawURL)
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	// Accept gzip encoding for large XMLTV files
+	req.Header.Set("Accept-Encoding", "gzip")
+	// Many EPG providers (including SiliconDust) block default Go HTTP clients
+	req.Header.Set("User-Agent", "TVApp/1.0 (Mozilla/5.0)")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	data, err := io.ReadAll(resp.Body)
+	var reader io.Reader = resp.Body
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		gz, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		defer gz.Close()
+		reader = gz
+	}
+
+	data, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, err
 	}
@@ -63,6 +87,15 @@ func parseXMLTVContent(data []byte) ([]Entry, error) {
 	var tv TV
 	if err := xml.Unmarshal(data, &tv); err != nil {
 		return nil, fmt.Errorf("xmltv unmarshal: %w", err)
+	}
+
+	channelNames := make(map[string]string)
+	channelLogos := make(map[string]string)
+	for _, ch := range tv.Channels {
+		channelNames[ch.ID] = ch.Name
+		if ch.Icon != nil {
+			channelLogos[ch.ID] = ch.Icon.Src
+		}
 	}
 
 	var entries []Entry
@@ -83,11 +116,14 @@ func parseXMLTVContent(data []byte) ([]Entry, error) {
 
 		entries = append(entries, Entry{
 			ChannelID:   p.ChannelID,
+			ChannelName: channelNames[p.ChannelID],
+			ChannelLogo: channelLogos[p.ChannelID],
+			Category:    p.Category,
 			Title:       p.Title,
 			Description: p.Description,
 			PosterURL:   posterURL,
-			StartTime:   start,
-			EndTime:     end,
+			StartTime:   start.UTC(),
+			EndTime:     end.UTC(),
 		})
 	}
 

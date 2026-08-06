@@ -81,6 +81,7 @@ tvapp/
 - **Player State** resets `isAtLiveEdge` and `isPlaying` correctly on channel switches.
 - **EPG Grid Rendering** is heavily memoized (`useMemo`) to prevent thousands of DOM nodes from re-rendering on state changes (like opening modals). ALWAYS place hooks at the top level of `EpgGrid.tsx` to avoid "Rules of Hooks" violations.
 - **EPG Infinite Scroll (Horizontal/Vertical)** dynamically appends 2-hour blocks to the grid width. It also uses a `visibleRows` state with `startTransition` to implement vertical lazy rendering, ensuring tuner switches are instantaneous.
+- **HDHomeRun EPG Integration**: Uses SiliconDust's XMLTV API (`api.hdhomerun.com/api/xmltv`). Requires `User-Agent` and `Accept-Encoding: gzip` headers. Timestamps are parsed from local time and strictly converted to UTC (`.UTC().Format(time.RFC3339)`) before SQLite insertion to prevent timezone mismatch errors on the frontend.
 - **EPG Category Mapping** normalizes messy M3U `group_title` values into 9 fixed buckets (Movies, News, Sports, etc.) on the frontend.
 - **Hero Fallbacks**: The channel list Hero defaults to the first available channel in the current category. Posters fall back to the channel `logo_url` if the EPG program lacks an `<icon src>`.
 

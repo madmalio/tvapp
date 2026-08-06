@@ -18,12 +18,13 @@ Multi-Source Architecture is fully integrated:
 - Backend DB wipes are now disabled so all configured sources persist permanently across server restarts.
 
 EPG (Live TV Guide) and Channel List improvements:
-- XMLTV parsing maps to M3U PlutoTV channels.
+- XMLTV parsing maps to M3U PlutoTV channels, and natively supports HDHomeRun XMLTV (extracting `display-name` and `icon src` to map channels correctly).
 - High-performance, heavily memoized React grid handles thousands of program nodes.
 - Infinite horizontal scroll implemented via time-windowed SQL queries.
 - Vertical infinite scroll implemented via `visibleRows` state, ensuring instantaneous tab switching.
 - Raw M3U group titles are dynamically mapped into simplified categories (Movies, News, Kids, etc.).
 - Channel Hero image caches are robust, falling back to channel logos when EPG posters are missing.
+- **Dynamic FFmpeg Transcoding**: Added a custom bandwidth speedtest (via pinging a `/api/speedtest` payload) that sets the stream quality on the frontend. FFmpeg uses strict CBR profiles (`-b:v`, `-maxrate`, `-bufsize`) and properly ordered VAAPI filters to eliminate buffering/pixelation during HDHomeRun playback.
 
 ## Architecture
 

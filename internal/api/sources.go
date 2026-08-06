@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -173,7 +174,97 @@ func parseSource(s db.SourceRow) {
 		}
 
 		db.ClearChannelsForSource(s.ID)
-		db.SaveChannels(rows)
+		if err := db.SaveChannels(rows); err != nil {
+			log.Printf("[source:%d] save channels failed: %v", s.ID, err)
+			return
+		}
 		log.Printf("[source:%d] loaded %d hdhomerun channels", s.ID, len(rows))
+
+		// Try fetching EPG
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		auth, err := hdhomerun.GetDeviceAuth(ctx, s.URL)
+		if err != nil {
+			log.Printf("[source:%d] no device auth (no guide sub or timeout): %v", s.ID, err)
+			return
+		}
+
+		epgURL := "https://api.hdhomerun.com/api/xmltv?DeviceAuth=" + auth
+		entries, err := epg.ParseXMLTV(epgURL)
+		if err != nil {
+			log.Printf("[source:%d] hdhomerun epg failed: %v", s.ID, err)
+			return
+		}
+
+		// Map channels back to IDs (XMLTV uses GuideNumber or GuideName for ChannelID)
+		savedChannels, _ := db.GetChannels()
+		channelMap := make(map[string]int)
+		for _, ch := range savedChannels {
+			if ch.SourceID == s.ID {
+				// We can map by Name (GuideName)
+				channelMap[ch.Name] = ch.ID
+			}
+		}
+
+		epgRows := []db.EPGEntryRow{}
+		var channelsToUpdate []db.ChannelRow
+		seenChannels := make(map[int]bool)
+
+		for _, e := range entries {
+			// SiliconDust XMLTV uses GuideName or GuideNumber for channel IDs.
+			// Try to match by ChannelName first (e.g. "WCBS-HD"), fallback to ChannelID
+			dbID, ok := channelMap[e.ChannelName]
+			if !ok {
+				dbID, ok = channelMap[e.ChannelID]
+			}
+			
+			if ok {
+				// Save EPG Entry
+				epgRows = append(epgRows, db.EPGEntryRow{
+					ChannelID:   dbID,
+					Title:       e.Title,
+					Description: e.Description,
+					PosterURL:   e.PosterURL,
+					StartTime:   e.StartTime.Format(time.RFC3339),
+					EndTime:     e.EndTime.Format(time.RFC3339),
+				})
+
+				// Extract Logo and Category from XMLTV to enrich the Channel
+				if !seenChannels[dbID] {
+					seenChannels[dbID] = true
+					
+					// Find the original channel struct to preserve other fields
+					var originalChannel db.ChannelRow
+					for _, c := range savedChannels {
+						if c.ID == dbID {
+							originalChannel = c
+							break
+						}
+					}
+
+					updated := false
+					if e.ChannelLogo != "" && originalChannel.LogoURL == "" {
+						originalChannel.LogoURL = e.ChannelLogo
+						updated = true
+					}
+					if e.Category != "" && originalChannel.GroupTitle == "HDHomeRun" {
+						originalChannel.GroupTitle = e.Category
+						updated = true
+					}
+					if updated {
+						channelsToUpdate = append(channelsToUpdate, originalChannel)
+					}
+				}
+			}
+		}
+
+		if len(channelsToUpdate) > 0 {
+			db.UpdateChannels(channelsToUpdate)
+			log.Printf("[source:%d] updated %d channels with xmltv metadata", s.ID, len(channelsToUpdate))
+		}
+
+		db.ClearEPGEntriesForSource(s.ID)
+		db.SaveEPGEntries(epgRows)
+		log.Printf("[source:%d] loaded %d hdhomerun epg entries", s.ID, len(epgRows))
 	}
 }

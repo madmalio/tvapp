@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
-import { ArrowLeft, Menu, X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, History } from "lucide-react";
+import { ArrowLeft, Menu, X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, History, Settings } from "lucide-react";
 import Hls from "hls.js";
 import { getApiUrl } from "../lib/api";
+import { useSpeedTest, StreamQuality } from "../hooks/useSpeedTest";
 
 type ChannelInfo = {
   id: number;
@@ -10,6 +11,7 @@ type ChannelInfo = {
   stream_url: string;
   logo_url?: string;
   group_title?: string;
+  tuner_type?: string;
 };
 
 const CATEGORIES = ['All', 'Movies', 'News', 'Sports', 'Kids', 'Entertainment', 'Docs & Learning', 'Music', 'Local', 'Other'];
@@ -43,6 +45,7 @@ export default function VideoPlayer() {
   const hlsRef = useRef<Hls | null>(null);
   const reloadAttemptsRef = useRef(0);
   const positionRef = useRef(0);
+  const streamSessionIdRef = useRef<string | null>(null);
   
   const [isPlaying, setIsPlaying] = useState(true);
   const [volume, setVolume] = useState(() => {
@@ -56,6 +59,9 @@ export default function VideoPlayer() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isAtLiveEdge, setIsAtLiveEdge] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
+  
+  const { preferredQuality, manuallySetQuality, speedMbps, isTesting } = useSpeedTest();
+  const [showQualityMenu, setShowQualityMenu] = useState(false);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [allChannels, setAllChannels] = useState<ChannelInfo[]>([]);
@@ -151,8 +157,33 @@ export default function VideoPlayer() {
     const video = videoRef.current;
     if (!video || !channel) return;
 
-    startPlayback(video, getProxyUrl());
+    if (streamSessionIdRef.current) {
+      fetch(getApiUrl(`/api/stream/stop/${streamSessionIdRef.current}`), { method: "DELETE" }).catch(console.error);
+      streamSessionIdRef.current = null;
+    }
 
+    if (channel.tuner_type === "hdhomerun") {
+      setStatus("Starting stream...");
+      fetch(getApiUrl("/api/stream/start"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: channel.stream_url, tuner_type: channel.tuner_type, quality: preferredQuality })
+      })
+      .then(r => {
+        if (!r.ok) throw new Error("Failed to start stream");
+        return r.json();
+      })
+      .then(data => {
+        streamSessionIdRef.current = data.id;
+        startPlayback(video, getApiUrl(data.manifest_url));
+      })
+      .catch(err => {
+        console.error(err);
+        setStatus("Stream error");
+      });
+    } else {
+      startPlayback(video, getProxyUrl());
+    }
     function onTimeUpdate() {
       positionRef.current = video?.currentTime || 0;
     }
@@ -228,6 +259,10 @@ export default function VideoPlayer() {
     }
 
     return () => {
+      if (streamSessionIdRef.current) {
+        fetch(getApiUrl(`/api/stream/stop/${streamSessionIdRef.current}`), { method: "DELETE" }).catch(console.error);
+        streamSessionIdRef.current = null;
+      }
       const hls = hlsRef.current;
       hlsRef.current = null;
       if (hls) {
@@ -238,7 +273,7 @@ export default function VideoPlayer() {
       video.removeAttribute('src');
       video.load();
     };
-  }, [channel, getProxyUrl]);
+  }, [channel, preferredQuality, getProxyUrl]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -370,7 +405,7 @@ export default function VideoPlayer() {
       />
 
       {/* Status Overlays */}
-      {status === "Loading..." || status === "Recovering..." ? (
+      {status === "Loading..." || status === "Recovering..." || status === "Starting stream..." ? (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20 bg-black">
           <div className="flex flex-col items-center">
             <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mb-4" />
@@ -448,16 +483,56 @@ export default function VideoPlayer() {
                 </button>
                 <input 
                   type="range" 
-                  min="0" max="1" step="0.05"
+                  min="0" 
+                  max="1" 
+                  step="0.05" 
                   value={isMuted ? 0 : volume}
                   onChange={(e) => {
-                    setIsMuted(false);
-                    setVolume(parseFloat(e.target.value));
+                    e.stopPropagation();
+                    const val = parseFloat(e.target.value);
+                    setVolume(val);
+                    if (val > 0) setIsMuted(false);
                   }}
-                  onClick={(e) => e.stopPropagation()}
-                  className="w-0 opacity-0 group-hover/volume:w-24 group-hover/volume:opacity-100 transition-all duration-300 origin-left accent-blue-500 h-1 cursor-pointer"
+                  className="w-20 md:w-24 h-1.5 md:h-2 bg-neutral-600 rounded-full appearance-none outline-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 md:[&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-3 md:[&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:scale-125 [&::-webkit-slider-thumb]:transition-transform"
                 />
               </div>
+
+              {channel?.tuner_type === "hdhomerun" && (
+                <div className="relative">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setShowQualityMenu(!showQualityMenu); }}
+                    className="text-white hover:text-blue-400 transition-colors focus:outline-none p-2 rounded-full"
+                    title="Stream Quality"
+                  >
+                    <Settings className="w-5 h-5 md:w-6 md:h-6" />
+                  </button>
+                  
+                  {showQualityMenu && (
+                    <div className="absolute bottom-full right-0 mb-4 w-56 bg-neutral-900/95 backdrop-blur-xl border border-neutral-700/50 rounded-2xl p-2 shadow-2xl flex flex-col gap-1 z-50 pointer-events-auto">
+                      <div className="text-xs font-semibold text-neutral-400 px-3 py-2 uppercase tracking-wider">
+                        Quality {isTesting ? "(Testing network...)" : (speedMbps ? `(Auto: ${Math.round(speedMbps)} Mbps)` : "")}
+                      </div>
+                      {(['source', '1080p_high', '1080p_std', '720p_high', '720p_std', '480p_high', '480p_std', '360p_low'] as StreamQuality[]).map((q) => (
+                        <button
+                          key={q}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            manuallySetQuality(q);
+                            setShowQualityMenu(false);
+                          }}
+                          className={`px-3 py-2 text-sm text-left rounded-xl transition-colors ${
+                            preferredQuality === q 
+                              ? 'bg-blue-600 text-white font-medium' 
+                              : 'text-neutral-300 hover:bg-neutral-800 hover:text-white'
+                          }`}
+                        >
+                          {q === 'source' ? 'Source (Original)' : q.replace('_', ' ').toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Last Channel Button */}
               {previousChannelId && (

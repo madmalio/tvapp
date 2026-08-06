@@ -206,6 +206,28 @@ func UpdateChannelURL(id int, streamURL string) error {
 	return err
 }
 
+func UpdateChannels(channels []ChannelRow) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`UPDATE channels SET logo_url = ?, group_title = ? WHERE id = ?`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, ch := range channels {
+		if _, err := stmt.Exec(ch.LogoURL, ch.GroupTitle, ch.ID); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
 func DB() *sql.DB {
 	return conn
 }

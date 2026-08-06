@@ -4,8 +4,10 @@ import ChannelList from "./components/ChannelList";
 import EpgGrid from "./components/EpgGrid";
 import VideoPlayer from "./components/VideoPlayer";
 import Settings from "./components/Settings";
+import { useSpeedTest } from "./hooks/useSpeedTest";
 
 export default function App() {
+  useSpeedTest(); // Triggers the global speed test on first load
   const location = useLocation();
   const isPlayer = location.pathname.startsWith('/player');
 

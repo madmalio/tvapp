@@ -8,9 +8,9 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"os"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -42,6 +42,7 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 	r.Put("/api/sources/{id}", updateSourceHandler)
 	r.Delete("/api/sources/{id}", deleteSourceHandler)
 	r.Get("/api/epg", getEpgHandler)
+	r.Get("/api/speedtest", speedtestHandler)
 	r.Post("/api/stream/start", startStreamHandler)
 	r.Delete("/api/stream/stop/{id}", stopStreamHandler)
 	r.Get("/api/stream/hls/*", serveHLSHandler)
@@ -589,7 +590,9 @@ func getEpgHandler(w http.ResponseWriter, r *http.Request) {
 
 func startStreamHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		URL string `json:"url"`
+		URL       string `json:"url"`
+		TunerType string `json:"tuner_type"`
+		Quality   string `json:"quality"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)
@@ -600,7 +603,11 @@ func startStreamHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := stream.Start(req.URL)
+	if req.Quality == "" {
+		req.Quality = "source"
+	}
+
+	sess, err := stream.Start(req.URL, req.TunerType, req.Quality)
 	if err != nil {
 		log.Printf("[stream] start error: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
