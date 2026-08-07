@@ -12,11 +12,16 @@ type ChannelInfo = {
   logo_url?: string;
   group_title?: string;
   tuner_type?: string;
+  source_id?: number;
 };
 
 const CATEGORIES = ['All', 'Movies', 'News', 'Sports', 'Kids', 'Entertainment', 'Docs & Learning', 'Music', 'Local', 'Other'];
 
-function mapCategory(rawGroup: string): string {
+function mapCategory(rawGroup: string, channelName: string = ""): string {
+  if (channelName) {
+    const lowerName = channelName.toLowerCase();
+    if (lowerName.match(/nbc|abc|cbs|fox|cw|pbs/)) return 'Local';
+  }
   if (!rawGroup) return 'Other';
   const lower = rawGroup.toLowerCase();
   if (lower.match(/movie|cinema|film|box office/)) return 'Movies';
@@ -123,7 +128,7 @@ export default function VideoPlayer() {
       const ch = allChannels.find(c => c.id === parseInt(channelId));
       if (ch) {
         setChannel(prev => prev?.id === ch.id ? prev : ch);
-        const mapped = mapCategory(ch.group_title || "");
+        const mapped = mapCategory(ch.group_title || "", ch.name || "");
         if (CATEGORIES.includes(mapped)) {
           setActiveCategory(prev => prev === mapped ? prev : mapped);
         } else {
@@ -137,7 +142,7 @@ export default function VideoPlayer() {
       .then(r => r.json())
       .then(ch => {
         setChannel(prev => prev?.id === ch.id ? prev : ch);
-        const mapped = mapCategory(ch.group_title || "");
+        const mapped = mapCategory(ch.group_title || "", ch.name || "");
         if (CATEGORIES.includes(mapped)) {
           setActiveCategory(prev => prev === mapped ? prev : mapped);
         } else {
@@ -195,15 +200,18 @@ export default function VideoPlayer() {
 
       if (Hls.isSupported()) {
         const hls = new Hls({
-          enableWorker: false,
-          maxBufferLength: 60,
-          maxMaxBufferLength: 120,
+          enableWorker: true, // Offload remuxing to a web worker to prevent UI blocking/micro-pauses
+          maxBufferLength: 90, // Buffer up to 90 seconds ahead
+          maxMaxBufferLength: 180, // Allow large buffers if network is unstable
+          maxBufferSize: 60 * 1024 * 1024, // 60MB max memory buffer
           manifestLoadingTimeOut: 20000,
           manifestLoadingMaxRetry: 4,
           levelLoadingTimeOut: 20000,
           levelLoadingMaxRetry: 4,
           fragLoadingTimeOut: 20000,
           fragLoadingMaxRetry: 6,
+          liveSyncDurationCount: 3, // Standard 12s HLS latency
+          liveMaxLatencyDurationCount: 15,
         });
         hlsRef.current = hls;
         hls.loadSource(url);
@@ -340,17 +348,23 @@ export default function VideoPlayer() {
     }
   }, []);
 
+  const currentSourceId = channel?.source_id;
+  const sourceChannels = useMemo(() => {
+    if (!currentSourceId) return allChannels;
+    return allChannels.filter(c => c.source_id === currentSourceId);
+  }, [allChannels, currentSourceId]);
+
   const availableCategories = useMemo(() => {
     return CATEGORIES.filter(cat => 
-      cat === 'All' || allChannels.some(ch => mapCategory(ch.group_title || "") === cat)
+      cat === 'All' || sourceChannels.some(ch => mapCategory(ch.group_title || "", ch.name || "") === cat)
     );
-  }, [allChannels]);
+  }, [sourceChannels]);
 
   const filteredChannels = useMemo(() => {
     return activeCategory === 'All' 
-      ? allChannels 
-      : allChannels.filter(ch => mapCategory(ch.group_title || "") === activeCategory);
-  }, [allChannels, activeCategory]);
+      ? sourceChannels 
+      : sourceChannels.filter(ch => mapCategory(ch.group_title || "", ch.name || "") === activeCategory);
+  }, [sourceChannels, activeCategory]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -363,9 +377,11 @@ export default function VideoPlayer() {
 
         let newIndex = currentIndex;
         if (e.key === 'ArrowUp') {
-          newIndex = currentIndex > 0 ? currentIndex - 1 : filteredChannels.length - 1;
-        } else if (e.key === 'ArrowDown') {
+          // Channel Up (next index in list)
           newIndex = currentIndex < filteredChannels.length - 1 ? currentIndex + 1 : 0;
+        } else if (e.key === 'ArrowDown') {
+          // Channel Down (previous index in list)
+          newIndex = currentIndex > 0 ? currentIndex - 1 : filteredChannels.length - 1;
         }
 
         const newChannel = filteredChannels[newIndex];

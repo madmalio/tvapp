@@ -31,6 +31,20 @@ go run .\cmd\server\
 npx --prefix web vite
 ```
 
+## Linux Server Deployment
+
+To deploy the application to the user's Linux server, compile a Linux binary and upload it via `scp`:
+
+```powershell
+# 1. Build the Linux binary
+$env:GOOS="linux"; $env:GOARCH="amd64"; go build -o bin\tvapp-linux .\cmd\server\
+
+# 2. Upload to server
+scp .\bin\tvapp-linux mark@192.168.4.143:~/tvapp/tvapp
+
+# 3. Note: The user runs MediaMTX on the server and will restart tvapp manually.
+```
+
 ## Frontend Dev
 
 ```powershell

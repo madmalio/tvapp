@@ -27,7 +27,11 @@ const PIXELS_PER_MINUTE = 8;
 
 const CATEGORIES = ['All', 'Movies', 'News', 'Sports', 'Kids', 'Entertainment', 'Docs & Learning', 'Music', 'Local', 'Other'];
 
-function mapCategory(rawGroup: string): string {
+function mapCategory(rawGroup: string, channelName: string = ""): string {
+  if (channelName) {
+    const lowerName = channelName.toLowerCase();
+    if (lowerName.match(/nbc|abc|cbs|fox|cw|pbs/)) return 'Local';
+  }
   if (!rawGroup) return 'Other';
   const lower = rawGroup.toLowerCase();
   if (lower.match(/movie|cinema|film|box office/)) return 'Movies';
@@ -116,14 +120,24 @@ export default function EpgGrid() {
     return earliest;
   }, [currentHour]);
 
+  const availableCategories = useMemo(() => {
+    return CATEGORIES.filter(cat => 
+      cat === 'All' || sourceChannels.some(c => mapCategory(c.group_title || "", c.name || "") === cat)
+    );
+  }, [sourceChannels]);
+
+  const filteredChannels = useMemo(() => {
+    let list = sourceChannels;
+    if (activeCategory !== 'All') {
+      list = list.filter(c => mapCategory(c.group_title || "", c.name || "") === activeCategory);
+    }
+    return list;
+  }, [sourceChannels, activeCategory]);
+
   const currentTimeOffset = (currentTime.getTime() - gridStartTime.getTime()) / 60000;
   const currentTimePixels = Math.max(0, currentTimeOffset) * PIXELS_PER_MINUTE;
 
   const gridContent = useMemo(() => {
-    const filteredChannels = activeCategory === 'All' 
-      ? sourceChannels 
-      : sourceChannels.filter(ch => mapCategory(ch.group_title) === activeCategory);
-
     return filteredChannels.slice(0, visibleRows).map((ch) => {
       const chEntries = epgByChannel[ch.id] || [];
       if (chEntries.length === 0) return null; // Hide channels with no EPG data
@@ -210,12 +224,7 @@ export default function EpgGrid() {
     });
   }, [sourceChannels, epgByChannel, gridStartTime, currentTime, currentTimeOffset, durationHours, activeCategory, visibleRows]);
 
-  const availableCategories = useMemo(() => {
-    const present = new Set<string>();
-    present.add('All');
-    sourceChannels.forEach(ch => present.add(mapCategory(ch.group_title)));
-    return CATEGORIES.filter(cat => present.has(cat));
-  }, [sourceChannels]);
+
 
   if (loading) {
     return (

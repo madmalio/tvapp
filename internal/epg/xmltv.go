@@ -16,9 +16,9 @@ type TV struct {
 }
 
 type Channel struct {
-	ID     string `xml:"id,attr"`
-	Name   string `xml:"display-name"`
-	Icon   *Icon  `xml:"icon,omitempty"`
+	ID          string   `xml:"id,attr"`
+	DisplayName []string `xml:"display-name"`
+	Icon        *Icon    `xml:"icon,omitempty"`
 }
 
 type Icon struct {
@@ -37,15 +37,15 @@ type Program struct {
 }
 
 type Entry struct {
-	ChannelID   string    `json:"channel_id"`
-	ChannelName string    `json:"channel_name"`
-	ChannelLogo string    `json:"channel_logo"`
-	Category    string    `json:"category"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	PosterURL   string    `json:"poster_url"`
-	StartTime   time.Time `json:"start_time"`
-	EndTime     time.Time `json:"end_time"`
+	ChannelID    string    `json:"channel_id"`
+	ChannelNames []string  `json:"channel_names"`
+	ChannelLogo  string    `json:"channel_logo"`
+	Category     string    `json:"category"`
+	Title        string    `json:"title"`
+	Description  string    `json:"description"`
+	PosterURL    string    `json:"poster_url"`
+	StartTime    time.Time `json:"start_time"`
+	EndTime      time.Time `json:"end_time"`
 }
 
 func ParseXMLTV(rawURL string) ([]Entry, error) {
@@ -64,6 +64,10 @@ func ParseXMLTV(rawURL string) ([]Entry, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("xmltv server returned status: %d", resp.StatusCode)
+	}
 
 	var reader io.Reader = resp.Body
 	if resp.Header.Get("Content-Encoding") == "gzip" {
@@ -89,10 +93,10 @@ func parseXMLTVContent(data []byte) ([]Entry, error) {
 		return nil, fmt.Errorf("xmltv unmarshal: %w", err)
 	}
 
-	channelNames := make(map[string]string)
+	channelNames := make(map[string][]string)
 	channelLogos := make(map[string]string)
 	for _, ch := range tv.Channels {
-		channelNames[ch.ID] = ch.Name
+		channelNames[ch.ID] = ch.DisplayName
 		if ch.Icon != nil {
 			channelLogos[ch.ID] = ch.Icon.Src
 		}
@@ -115,15 +119,15 @@ func parseXMLTVContent(data []byte) ([]Entry, error) {
 		}
 
 		entries = append(entries, Entry{
-			ChannelID:   p.ChannelID,
-			ChannelName: channelNames[p.ChannelID],
-			ChannelLogo: channelLogos[p.ChannelID],
-			Category:    p.Category,
-			Title:       p.Title,
-			Description: p.Description,
-			PosterURL:   posterURL,
-			StartTime:   start.UTC(),
-			EndTime:     end.UTC(),
+			ChannelID:    p.ChannelID,
+			ChannelNames: channelNames[p.ChannelID],
+			ChannelLogo:  channelLogos[p.ChannelID],
+			Category:     p.Category,
+			Title:        p.Title,
+			Description:  p.Description,
+			PosterURL:    posterURL,
+			StartTime:    start.UTC(),
+			EndTime:      end.UTC(),
 		})
 	}
 

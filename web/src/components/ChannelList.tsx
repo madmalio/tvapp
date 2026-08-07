@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef, startTransition } from "react";
+import { useEffect, useState, useMemo, useRef, startTransition, memo } from "react";
 import { Link } from "react-router-dom";
 import { Play, ChevronLeft, ChevronRight, Tv } from "lucide-react";
 import { getApiUrl } from "../lib/api";
@@ -27,7 +27,11 @@ type EPGEntry = {
 
 const CATEGORIES = ['All', 'Movies', 'News', 'Sports', 'Kids', 'Entertainment', 'Docs & Learning', 'Music', 'Local', 'Other'];
 
-function mapCategory(rawGroup: string): string {
+function mapCategory(rawGroup: string, channelName: string = ""): string {
+  if (channelName) {
+    const lowerName = channelName.toLowerCase();
+    if (lowerName.match(/nbc|abc|cbs|fox|cw|pbs/)) return 'Local';
+  }
   if (!rawGroup) return 'Other';
   const lower = rawGroup.toLowerCase();
   if (lower.match(/movie|cinema|film|box office/)) return 'Movies';
@@ -41,7 +45,7 @@ function mapCategory(rawGroup: string): string {
   return 'Other';
 }
 
-function ChannelCarousel({ groupName, channels, onHover }: { groupName: string; channels: Channel[]; onHover: (ch: Channel) => void }) {
+const ChannelCarousel = memo(function ChannelCarousel({ groupName, channels, onHover }: { groupName: string; channels: Channel[]; onHover: (ch: Channel) => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const scroll = (direction: "left" | "right") => {
@@ -110,7 +114,7 @@ function ChannelCarousel({ groupName, channels, onHover }: { groupName: string; 
       </div>
     </div>
   );
-}
+});
 
 export default function ChannelList() {
   const { data: sources } = useApi<Source[]>('/api/sources');
@@ -142,22 +146,23 @@ export default function ChannelList() {
     return channels.filter(c => c.source_id === activeSourceId);
   }, [channels, activeSourceId]);
 
-  const { heroChannel, filteredChannels, availableCategories } = useMemo(() => {
-    if (sourceChannels.length === 0) return { heroChannel: null, filteredChannels: [], availableCategories: [] };
-    
-    const present = new Set<string>();
-    present.add('All');
-    sourceChannels.forEach(ch => present.add(mapCategory(ch.group_title || "")));
-    const avail = CATEGORIES.filter(cat => present.has(cat));
-    
-    const filtered = activeCategory === 'All' 
-      ? sourceChannels 
-      : sourceChannels.filter(ch => mapCategory(ch.group_title || "") === activeCategory);
-      
-    const hero = filtered.find(c => c.logo_url) || filtered[0];
-    
-    return { heroChannel: hero, filteredChannels: filtered, availableCategories: avail };
+  const availableCategories = useMemo(() => {
+    return CATEGORIES.filter(cat => 
+      cat === 'All' || sourceChannels.some(c => mapCategory(c.group_title || "", c.name || "") === cat)
+    );
+  }, [sourceChannels]);
+
+  const filteredChannels = useMemo(() => {
+    let list = sourceChannels;
+    if (activeCategory !== 'All') {
+      list = list.filter(c => mapCategory(c.group_title || "", c.name || "") === activeCategory);
+    }
+    return list;
   }, [sourceChannels, activeCategory]);
+
+  const heroChannel = useMemo(() => {
+    return filteredChannels.find(c => c.logo_url) || filteredChannels[0];
+  }, [filteredChannels]);
 
   const [hoveredChannel, setHoveredChannel] = useState<Channel | null>(null);
   
@@ -165,10 +170,8 @@ export default function ChannelList() {
     setHoveredChannel(null);
   }, [activeSourceId, activeCategory]);
 
-  const [heroProgram, setHeroProgram] = useState<EPGEntry | null>(null);
-  const [isFetchingProgram, setIsFetchingProgram] = useState(true);
-  const [heroReady, setHeroReady] = useState(false);
-
+  const [epgData, setEpgData] = useState<EPGEntry[]>([]);
+  
   useEffect(() => {
     if (heroChannel && !hoveredChannel) {
       setHoveredChannel(heroChannel);
@@ -178,55 +181,28 @@ export default function ChannelList() {
   const activeHeroChannel = hoveredChannel || heroChannel;
 
   useEffect(() => {
-    if (!loading && channels.length === 0) {
-      setHeroReady(true);
-      return;
-    }
-    if (!loading && sourceChannels.length === 0) {
-      setHeroReady(true);
-      return;
-    }
-    
-    if (!activeHeroChannel) return;
-
-    setIsFetchingProgram(true);
-    
     const now = new Date();
     const start = new Date(now.getTime() - 1 * 60 * 60 * 1000).toISOString();
     const end = new Date(now.getTime() + 1 * 60 * 60 * 1000).toISOString();
     
     fetch(getApiUrl(`/api/epg?start=${start}&end=${end}`))
       .then(r => r.json())
-      .then(async (data: EPGEntry[]) => {
-        if (!data || data.length === 0) {
-          setHeroProgram(null);
-          return;
-        }
-        
-        const liveShow = data.find(e => 
-          e.channel_id === activeHeroChannel.id && 
-          new Date(e.start_time) <= now && 
-          new Date(e.end_time) > now
-        );
-        
-        setHeroProgram(liveShow || null);
-        
-        const posterUrl = liveShow?.poster_url;
-        if (posterUrl) {
-          await new Promise<void>((resolve) => {
-            const img = new Image();
-            img.onload = () => resolve();
-            img.onerror = () => resolve();
-            img.src = posterUrl;
-          });
-        }
-      })
-      .catch(console.error)
-      .finally(() => {
-        setIsFetchingProgram(false);
-        setHeroReady(true);
-      });
-  }, [activeHeroChannel, loading, channels.length, sourceChannels.length]);
+      .then(data => setEpgData(data || []))
+      .catch(console.error);
+  }, []);
+
+  const heroProgram = useMemo(() => {
+    if (!activeHeroChannel) return null;
+    const now = new Date();
+    return epgData.find(e => 
+      e.channel_id === activeHeroChannel.id && 
+      new Date(e.start_time) <= now && 
+      new Date(e.end_time) > now
+    ) || null;
+  }, [activeHeroChannel, epgData]);
+
+  const isFetchingProgram = false;
+  const heroReady = true;
 
   if (loading || !heroReady) {
     return (
@@ -260,7 +236,7 @@ export default function ChannelList() {
       
       {/* Top Source Tabs */}
       {sources && sources.length > 1 && (
-        <div className="absolute top-0 left-0 right-0 z-50 px-24 py-4 flex gap-2">
+        <div className="relative pt-4 pb-2 px-24 z-50 flex gap-2">
           {sources.map(src => (
             <button
               key={src.id}

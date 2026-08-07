@@ -208,7 +208,8 @@ func (s *Session) runLoop() {
 			videoArgs = GetOptimalVideoArgs(s.Quality)
 		}
 
-		output := filepath.Join(s.Dir, "stream.m3u8")
+		rtspURL := fmt.Sprintf("rtsp://localhost:8554/%s", s.ID)
+
 		headers := ffmpegHeaders(streamURL)
 		args := []string{
 			"-user_agent", userAgent,
@@ -224,13 +225,11 @@ func (s *Session) runLoop() {
 			"-c:a", "aac",
 			"-b:a", "128k",
 			"-ac", "2",
-			"-hls_time", "4",
-			"-hls_list_size", "15",
-			"-hls_init_time", "4",
-			"-hls_flags", "delete_segments+append_list+independent_segments",
+			"-f", "rtsp",
+			"-rtsp_transport", "tcp",
+			"-pkt_size", "1200",
 			"-loglevel", "warning",
-			"-y",
-			output,
+			rtspURL,
 		)
 
 		cmd := exec.Command("ffmpeg", args...)
@@ -262,8 +261,17 @@ func (s *Session) runLoop() {
 		case err := <-done:
 			stderr.Close()
 			log.Printf("[stream] %s ffmpeg exited: %v", s.ID, err)
+			
+			// If it crashed, dump the log to help with debugging
+			logData, _ := os.ReadFile(filepath.Join(s.Dir, "ffmpeg.log"))
+			if len(logData) > 0 {
+				log.Printf("[stream] %s ffmpeg log: %s", s.ID, string(logData))
+			}
+			
 		case <-s.stopCh:
-			cmd.Process.Kill()
+			if cmd.Process != nil {
+				cmd.Process.Kill()
+			}
 			stderr.Close()
 			<-done
 			log.Printf("[stream] %s ffmpeg killed", s.ID)

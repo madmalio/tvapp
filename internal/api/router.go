@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -649,30 +647,53 @@ func serveHLSHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "stream not found", http.StatusNotFound)
 		return
 	}
-
-	// For manifest requests, wait up to 30s for FFmpeg to produce it
+	targetFilename := filename
 	if filename == "stream.m3u8" {
-		if !sess.WaitReady(30 * time.Second) {
-			http.Error(w, "stream timeout", http.StatusGatewayTimeout)
-			return
-		}
+		targetFilename = "index.m3u8"
 	}
-
-	filePath := filepath.Join(sess.Dir, filename)
-	if _, err := os.Stat(filePath); err != nil {
-		w.Header().Set("Retry-After", "2")
-		http.Error(w, "segment not ready", http.StatusServiceUnavailable)
+	targetURL := fmt.Sprintf("http://127.0.0.1:8888/%s/%s", id, targetFilename)
+	if r.URL.RawQuery != "" {
+		targetURL += "?" + r.URL.RawQuery
+	}
+	
+	reqProxy, err := http.NewRequest("GET", targetURL, nil)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	switch {
-	case strings.HasSuffix(filename, ".m3u8"):
-		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-	case strings.HasSuffix(filename, ".ts"):
-		w.Header().Set("Content-Type", "video/mp2t")
-	case strings.HasSuffix(filename, ".m4s"):
-		w.Header().Set("Content-Type", "video/iso.segment")
-	case strings.HasSuffix(filename, ".mp4"):
-		w.Header().Set("Content-Type", "video/mp4")
+	
+	for k, v := range r.Header {
+		reqProxy.Header[k] = v
 	}
-	http.ServeFile(w, r, filePath)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	
+	var resp *http.Response
+	if filename == "stream.m3u8" {
+		// Wait up to ~7.5 seconds for MediaMTX to begin publishing
+		for i := 0; i < 15; i++ {
+			resp, err = client.Do(reqProxy)
+			if err == nil && resp.StatusCode == 200 {
+				break
+			}
+			if resp != nil {
+				resp.Body.Close()
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	} else {
+		resp, err = client.Do(reqProxy)
+	}
+
+	if err != nil || resp == nil || resp.StatusCode != 200 {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	defer resp.Body.Close()
+
+	for k, v := range resp.Header {
+		w.Header()[k] = v
+	}
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }

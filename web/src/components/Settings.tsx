@@ -176,7 +176,21 @@ export default function Settings() {
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => { setFormSource(src); saveSource({ preventDefault: () => {} } as any); }}
+                          onClick={() => {
+                            // Call api directly to avoid async state issues
+                            setLoading(true);
+                            fetch(getApiUrl(`/api/sources/${src.id}`), {
+                              method: 'PUT',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify(src)
+                            }).then(res => {
+                              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                              setMessage(`Source refreshed.`);
+                              refetchSources();
+                            }).catch(err => {
+                              setMessage(`Error: ${err.message}`);
+                            }).finally(() => setLoading(false));
+                          }}
                           className="p-2 text-blue-400 hover:text-blue-300 hover:bg-blue-900/30 rounded-lg transition-colors"
                           title="Force Refresh"
                         >

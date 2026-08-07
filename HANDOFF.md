@@ -15,16 +15,21 @@ Multi-Source Architecture is fully integrated:
 - Supports unlimited M3U playlists and HDHomeRun tuners side-by-side.
 - Database utilizes `source_id` foreign keys to track channels and EPG entries by source.
 - UI implements horizontal Source Tabs allowing users to instantly switch between active tuners.
-- Backend DB wipes are now disabled so all configured sources persist permanently across server restarts.
+- Backend DB wipes are disabled so all configured sources persist permanently across server restarts.
 
 EPG (Live TV Guide) and Channel List improvements:
 - XMLTV parsing maps to M3U PlutoTV channels, and natively supports HDHomeRun XMLTV (extracting `display-name` and `icon src` to map channels correctly).
-- High-performance, heavily memoized React grid handles thousands of program nodes.
-- Infinite horizontal scroll implemented via time-windowed SQL queries.
-- Vertical infinite scroll implemented via `visibleRows` state, ensuring instantaneous tab switching.
-- Raw M3U group titles are dynamically mapped into simplified categories (Movies, News, Kids, etc.).
+- **HDHomeRun Affiliate Extraction**: Dynamically scans HDHomeRun XMLTV arrays for affiliate network names (NBC, ABC, FOX, CBS, CW, PBS, ION), assigns the `GroupTitle` to "Local", and appends the network to the channel name for the UI.
+- High-performance React grid (`ChannelList.tsx`) handles thousands of channels smoothly:
+  - Memoized `ChannelCarousel` to prevent cascading redraws on hover.
+  - EPG JSON is fetched *once* on load and cached in a state array, preventing network waterfall stalls during rapid hovering.
 - Channel Hero image caches are robust, falling back to channel logos when EPG posters are missing.
-- **Dynamic FFmpeg Transcoding**: Added a custom bandwidth speedtest (via pinging a `/api/speedtest` payload) that sets the stream quality on the frontend. FFmpeg uses strict CBR profiles (`-b:v`, `-maxrate`, `-bufsize`) and properly ordered VAAPI filters to eliminate buffering/pixelation during HDHomeRun playback.
+
+**MediaMTX Live Streaming Architecture (HDHomeRun & Custom Streams)**:
+- Migrated away from disk-based `.ts` chunk generation which caused severe disk I/O bottlenecks and stuttering.
+- `ffmpeg` now pipes streams directly into MediaMTX memory via RTSP (`rtsp://localhost:8554/<id>`).
+- Solved MediaMTX UDP remuxing stalls over Tailscale by forcing `-pkt_size 1200` in the `ffmpeg` pipeline.
+- `tvapp` backend reverse-proxies MediaMTX's Low-Latency HLS (`http://127.0.0.1:8888/<id>/index.m3u8`), strictly forwarding query parameters (`?session=...`) to ensure MediaMTX validates segment requests.
 
 ## Architecture
 
@@ -45,84 +50,38 @@ User clicks channel
   → hls.js decrypts AES-128 segments and plays
 ```
 
-### Proactive Session Management
+### Server Deployment
 
-- **Variant cache** caches resolved variant URL per master URL
-- **Media sequence tracking** — if sequence doesn't advance between fetches, detects stall and re-resolves from master (fresh tokens)
-- **Discontinuity detection** — `#EXT-X-DISCONTINUITY` triggers re-resolution for ad transitions
-- **Cache TTL** — 10 minutes; expired entries force master re-resolution
-- **Lazy M3U refresh** — channel stream URLs refreshed from original M3U every 15 min on-demand
+The user deploys this application to a Linux server on their network (`192.168.4.143`) which is also running MediaMTX locally. To deploy a new version:
 
-### Auto-Recovery (Frontend)
+```powershell
+# 1. Build the Linux binary (make sure Vite frontend is built and copied into webdist first)
+$env:GOOS="linux"; $env:GOARCH="amd64"; go build -o bin\tvapp-linux .\cmd\server\
 
-- On hls.js fatal error, destroys and re-creates hls instance
-- 2-second delay, up to 3 attempts
-- Resumes from live edge (no seek to stale position)
-- Spinner overlay during recovery (no text blocking video)
+# 2. Upload to server
+scp .\bin\tvapp-linux mark@192.168.4.143:~/tvapp/tvapp
+
+# 3. Wait for user to manually restart the process on the server
+```
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `internal/api/router.go` | All HTTP routes, proxy handler, variant cache, lazy refresh |
-| `internal/iptv/m3u.go` | M3U playlist parser (UA/Referer/Origin headers) |
-| `internal/stream/manager.go` | FFmpeg stream manager (fallback for non-HLS) |
-| `internal/db/schema.go` | SQLite schema, CRUD, UpdateChannelURL |
+| `internal/api/router.go` | HTTP routes, MediaMTX HLS proxy (`index.m3u8`), PlutoTV proxy |
+| `internal/api/sources.go` | EPG and XMLTV import logic, HDHomeRun affiliate extraction |
+| `internal/stream/manager.go` | FFmpeg manager (Pipes to MediaMTX via RTSP, `-pkt_size 1200`) |
+| `web/src/components/ChannelList.tsx` | UI Guide, Hero Poster, Cached EPG, Memoized Carousel |
 | `web/src/components/VideoPlayer.tsx` | hls.js player with auto-recovery |
-| `web/src/components/Settings.tsx` | M3U/EPG URL input, HDHomeRun scan |
 
-## Configuration
+## Outstanding Tasks
 
-- No `.env` needed. Port defaults to `8080` (override via `PORT` env var)
-- FFmpeg must be in PATH (only used for non-HLS fallback)
-- SQLite database `tvapp.db` created automatically
-
-## Known Issues
-
-### 1. Freeze after extended playback (2-15 min intervals)
-
-**Symptoms**: Stream plays for 2-15 minutes then freezes. hls.js recovers (auto-reconnect kicks in), but the freeze may repeat.
-
-**Root cause**: PlutoTV CDN rotates session tokens on an unpredictable schedule. The proxy detects stalls via media-sequence checks and re-resolves, but there's a brief interruption during the transition.
-
-**Status**: Mitigated by proactive detection + auto-recovery. Not fully solved.
-
-**Potential improvements**:
-- Reduce the stall detection interval (currently only checks on manifest refresh, which is every ~5s)
-- Add a background keepalive goroutine that proactively re-resolves cached variants every 60s
-- Test with different hls.js buffer/retry settings
-
-### 2. Some channels more prone to freezes than others
-
-**Symptoms**: Certain PlutoTV channels (movie channels with AES-128 DRM) freeze more often than unencrypted channels.
-
-**Root cause**: AES-128 key file requests add additional failure points. If a key file fetch fails, the segment can't be decrypted.
-
-**Status**: Key files now return correct 16-byte keys with the `Origin: http://pluto.tv` fix.
-
-**Potential improvements**: Monitor key file response sizes server-side and log failures.
-
-### 3. FFmpeg path may be stale
-
-The FFmpeg stream manager (`internal/stream/manager.go`) has resilience flags (`-fflags +genpts`, `-err_detect ignore_err`, etc.) added during development but is no longer the primary path for PlutoTV. It's kept as a fallback for non-HLS streams (e.g., raw MPEG-TS from HDHomeRun). May need testing if used.
-
-### 4. EPG Architecture Notes
-
-The EPG data flows from XMLTV parsing into SQLite. Due to the massive scale of EPG data (tens of thousands of nodes):
-- The backend API (`/api/epg`) uses strict time-windowing bounds.
-- The frontend grid (`EpgGrid.tsx`) uses `useMemo` hooks per-row to isolate render cycles.
-- Horizontal scrolling dynamically bumps the `durationHours` state to fetch new blocks.
-
-## Dependencies
-
-- **Go 1.22+** — Chi v5, go-sqlite3
-- **Node/TypeScript** — React 19, React Router, hls.js, Tailwind CSS v4
-- **System** — FFmpeg (for non-HLS fallback only)
+1. **Distracting "Red Pill" UI**: When switching channels, a red "Starting stream..." pill flashes on the screen which the user finds distracting. Needs to be removed or smoothed out.
+2. **Quality Selector Settings**: Ensure the UI quality selector correctly reflects and respects the bitrate/quality set by the automated speedtest.
 
 ## Future Work
 
 1. **Favorites** — The `favorites` table exists in the schema but no UI
 2. **Channel search** — Text search for channels/programs
 3. **DVR / Recording** — Hook up future program clicks in the modal to a scheduled recording service
-4. **Stream analytics** — Track freeze frequency, recovery success rate, buffer health
-5. **Native HLS on Safari** — Detect Safari and use `<video src>` directly (no proxy needed, bypasses CORS)
+4. **Native HLS on Safari** — Detect Safari and use `<video src>` directly (no proxy needed, bypasses CORS)

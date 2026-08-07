@@ -3,9 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -98,7 +100,7 @@ func parseSource(s db.SourceRow) {
 			log.Printf("[source:%d] m3u parse failed: %v", s.ID, err)
 			return
 		}
-		
+
 		rows := make([]db.ChannelRow, len(iptvChannels))
 		for i, ch := range iptvChannels {
 			rows[i] = db.ChannelRow{
@@ -161,7 +163,7 @@ func parseSource(s db.SourceRow) {
 			log.Printf("[source:%d] hdhomerun lineup failed: %v", s.ID, err)
 			return
 		}
-		
+
 		rows := make([]db.ChannelRow, len(channels))
 		for i, ch := range channels {
 			rows[i] = db.ChannelRow{
@@ -170,6 +172,7 @@ func parseSource(s db.SourceRow) {
 				StreamURL:  ch.URL,
 				GroupTitle: "HDHomeRun",
 				TunerType:  "hdhomerun",
+				TvgID:      ch.GuideNumber,
 			}
 		}
 
@@ -198,26 +201,49 @@ func parseSource(s db.SourceRow) {
 
 		// Map channels back to IDs (XMLTV uses GuideNumber or GuideName for ChannelID)
 		savedChannels, _ := db.GetChannels()
-		channelMap := make(map[string]int)
-		for _, ch := range savedChannels {
-			if ch.SourceID == s.ID {
-				// We can map by Name (GuideName)
-				channelMap[ch.Name] = ch.ID
-			}
-		}
 
 		epgRows := []db.EPGEntryRow{}
-		var channelsToUpdate []db.ChannelRow
-		seenChannels := make(map[int]bool)
+		channelUpdates := make(map[int]*db.ChannelRow)
 
 		for _, e := range entries {
-			// SiliconDust XMLTV uses GuideName or GuideNumber for channel IDs.
-			// Try to match by ChannelName first (e.g. "WCBS-HD"), fallback to ChannelID
-			dbID, ok := channelMap[e.ChannelName]
-			if !ok {
-				dbID, ok = channelMap[e.ChannelID]
+			var dbID int
+			var ok bool
+
+			// Find matching channel. XMLTV display-names often look like "11.1 KCHFDT"
+			for _, c := range savedChannels {
+				if c.SourceID != s.ID {
+					continue
+				}
+
+				// Exact match on raw ID
+				if e.ChannelID == c.TvgID || e.ChannelID == c.Name {
+					dbID = c.ID
+					ok = true
+					break
+				}
+
+				// Search display names for exact match or correct prefix (e.g. "11.1" in "11.1 KCHFDT")
+				for _, dName := range e.ChannelNames {
+					if dName == c.Name || dName == c.TvgID {
+						dbID = c.ID
+						ok = true
+						break
+					}
+					// Display names are often like "11.1 KCHFDT" or "11.1". We want to strictly match the guide number.
+					if c.TvgID != "" {
+						parts := strings.Split(dName, " ")
+						if len(parts) > 0 && parts[0] == c.TvgID {
+							dbID = c.ID
+							ok = true
+							break
+						}
+					}
+				}
+				if ok {
+					break
+				}
 			}
-			
+
 			if ok {
 				// Save EPG Entry
 				epgRows = append(epgRows, db.EPGEntryRow{
@@ -230,31 +256,43 @@ func parseSource(s db.SourceRow) {
 				})
 
 				// Extract Logo and Category from XMLTV to enrich the Channel
-				if !seenChannels[dbID] {
-					seenChannels[dbID] = true
-					
-					// Find the original channel struct to preserve other fields
-					var originalChannel db.ChannelRow
+				ch, exists := channelUpdates[dbID]
+				if !exists {
 					for _, c := range savedChannels {
 						if c.ID == dbID {
-							originalChannel = c
+							copy := c
+							channelUpdates[dbID] = &copy
+							ch = &copy
 							break
 						}
 					}
+				}
 
-					updated := false
-					if e.ChannelLogo != "" && originalChannel.LogoURL == "" {
-						originalChannel.LogoURL = e.ChannelLogo
-						updated = true
+				if ch != nil {
+					if e.ChannelLogo != "" && ch.LogoURL == "" {
+						ch.LogoURL = e.ChannelLogo
 					}
-					if e.Category != "" && originalChannel.GroupTitle == "HDHomeRun" {
-						originalChannel.GroupTitle = e.Category
-						updated = true
-					}
-					if updated {
-						channelsToUpdate = append(channelsToUpdate, originalChannel)
+					
+					// Scan XMLTV DisplayNames for Affiliate network (NBC, ABC, CBS, etc.)
+					for _, name := range e.ChannelNames {
+						upper := strings.ToUpper(name)
+						if upper == "NBC" || upper == "ABC" || upper == "CBS" || upper == "FOX" || upper == "CW" || upper == "PBS" || upper == "ION" {
+							// If the channel name doesn't already contain the affiliate, append it
+							if !strings.Contains(strings.ToUpper(ch.Name), upper) {
+								ch.Name = fmt.Sprintf("%s (%s)", ch.Name, upper)
+							}
+							ch.GroupTitle = "Local"
+							break
+						}
 					}
 				}
+			}
+		}
+
+		var channelsToUpdate []db.ChannelRow
+		for _, ch := range channelUpdates {
+			if ch.LogoURL != "" || ch.GroupTitle != "HDHomeRun" {
+				channelsToUpdate = append(channelsToUpdate, *ch)
 			}
 		}
 
