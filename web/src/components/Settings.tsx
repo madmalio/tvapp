@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Server, Settings as SettingsIcon, Video, HardDrive, Sliders, Tv, Radio, Plus, Trash2, Edit2, RefreshCw } from "lucide-react";
-import { getApiUrl } from "../lib/api";
+import { getApiUrl, clearApiCache } from "../lib/api";
 import { useApi } from "../hooks/useApi";
 
 type Tab = 'iptv' | 'server' | 'rtsp' | 'dvr' | 'preferences';
@@ -51,6 +51,7 @@ export default function Settings() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       
       setMessage(`Source saved. Background sync started.`);
+      clearApiCache();
       setShowAddModal(false);
       refetchSources();
     } catch (err: any) {
@@ -66,6 +67,7 @@ export default function Settings() {
       const res = await fetch(getApiUrl(`/api/sources/${id}`), { method: 'DELETE' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setMessage(`Source deleted.`);
+      clearApiCache();
       setShowDeleteModal(null);
       refetchSources();
     } catch (err: any) {
@@ -186,6 +188,7 @@ export default function Settings() {
                             }).then(res => {
                               if (!res.ok) throw new Error(`HTTP ${res.status}`);
                               setMessage(`Source refreshed.`);
+                              clearApiCache();
                               refetchSources();
                             }).catch(err => {
                               setMessage(`Error: ${err.message}`);

@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, startTransition } from "react";
 import { Link } from "react-router-dom";
-import { getApiUrl } from "../lib/api";
+import { getApiUrl, fetchWithCache } from "../lib/api";
 import { useApi } from "../hooks/useApi";
 import { Tv } from "lucide-react";
 
@@ -92,8 +92,8 @@ export default function EpgGrid() {
     const end = new Date(now.getTime() + (durationHours - 2) * 60 * 60 * 1000).toISOString();
 
     Promise.all([
-      fetch(getApiUrl("/api/channels")).then(r => r.json()),
-      fetch(getApiUrl(`/api/epg?start=${start}&end=${end}`)).then(r => r.json())
+      fetchWithCache(getApiUrl("/api/channels")),
+      fetchWithCache(getApiUrl(`/api/epg?start=${start}&end=${end}`))
     ]).then(([chData, epgData]) => {
       setChannels(chData || []);
       setEntries(epgData || []);

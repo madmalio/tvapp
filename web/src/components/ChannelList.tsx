@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useRef, startTransition, memo } from "react";
 import { Link } from "react-router-dom";
 import { Play, ChevronLeft, ChevronRight, Tv } from "lucide-react";
-import { getApiUrl } from "../lib/api";
+import { getApiUrl, fetchWithCache } from "../lib/api";
 import { useApi } from "../hooks/useApi";
 
 type Source = { id: number; name: string; type: string; url: string; epg_url: string; };
@@ -124,8 +124,7 @@ export default function ChannelList() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(getApiUrl("/api/channels"))
-      .then((r) => r.json())
+    fetchWithCache(getApiUrl("/api/channels"))
       .then((data) => {
         setChannels(data || []);
         setLoading(false);
@@ -185,8 +184,7 @@ export default function ChannelList() {
     const start = new Date(now.getTime() - 1 * 60 * 60 * 1000).toISOString();
     const end = new Date(now.getTime() + 1 * 60 * 60 * 1000).toISOString();
     
-    fetch(getApiUrl(`/api/epg?start=${start}&end=${end}`))
-      .then(r => r.json())
+    fetchWithCache(getApiUrl(`/api/epg?start=${start}&end=${end}`))
       .then(data => setEpgData(data || []))
       .catch(console.error);
   }, []);

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { ArrowLeft, Menu, X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, History, Settings } from "lucide-react";
 import Hls from "hls.js";
-import { getApiUrl } from "../lib/api";
+import { getApiUrl, fetchWithCache } from "../lib/api";
 import { useSpeedTest, StreamQuality } from "../hooks/useSpeedTest";
 
 type ChannelInfo = {
@@ -98,8 +98,8 @@ export default function VideoPlayer() {
 
   useEffect(() => {
     Promise.all([
-      fetch(getApiUrl('/api/channels')).then(r => r.json()),
-      fetch(getApiUrl(`/api/epg?start=${new Date(Date.now() - 3600000).toISOString()}&end=${new Date(Date.now() + 3600000).toISOString()}`)).then(r => r.json())
+      fetchWithCache(getApiUrl('/api/channels')),
+      fetchWithCache(getApiUrl(`/api/epg?start=${new Date(Date.now() - 3600000).toISOString()}&end=${new Date(Date.now() + 3600000).toISOString()}`))
     ])
     .then(([allCh, epgData]) => {
       setAllChannels(allCh);
@@ -138,8 +138,7 @@ export default function VideoPlayer() {
       }
     }
     
-    fetch(getApiUrl(`/api/channels/${channelId}`))
-      .then(r => r.json())
+    fetchWithCache(getApiUrl(`/api/channels/${channelId}`))
       .then(ch => {
         setChannel(prev => prev?.id === ch.id ? prev : ch);
         const mapped = mapCategory(ch.group_title || "", ch.name || "");
