@@ -22,8 +22,7 @@ func startMediaMTX() *exec.Cmd {
 	}
 
 	cmd := exec.Command(bin)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// Do not bind stdout/stderr to prevent IO blocking that causes stuttering
 	if err := cmd.Start(); err != nil {
 		log.Printf("Warning: failed to start mediamtx (%s): %v", bin, err)
 		return nil
