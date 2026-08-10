@@ -181,6 +181,7 @@ export default function ChannelList() {
 
   useEffect(() => {
     const now = new Date();
+    now.setMinutes(0, 0, 0); // Align to the start of the hour for stable cache keys
     const start = new Date(now.getTime() - 1 * 60 * 60 * 1000).toISOString();
     const end = new Date(now.getTime() + 1 * 60 * 60 * 1000).toISOString();
     

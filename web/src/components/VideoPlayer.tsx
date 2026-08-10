@@ -97,9 +97,14 @@ export default function VideoPlayer() {
   }, [channel]);
 
   useEffect(() => {
+    const now = new Date();
+    now.setMinutes(0, 0, 0); // Align to the start of the hour for stable cache keys
+    const start = new Date(now.getTime() - 3600000).toISOString();
+    const end = new Date(now.getTime() + 3600000).toISOString();
+
     Promise.all([
       fetchWithCache(getApiUrl('/api/channels')),
-      fetchWithCache(getApiUrl(`/api/epg?start=${new Date(Date.now() - 3600000).toISOString()}&end=${new Date(Date.now() + 3600000).toISOString()}`))
+      fetchWithCache(getApiUrl(`/api/epg?start=${start}&end=${end}`))
     ])
     .then(([allCh, epgData]) => {
       setAllChannels(allCh);
