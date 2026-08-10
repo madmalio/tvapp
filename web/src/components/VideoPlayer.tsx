@@ -167,12 +167,19 @@ export default function VideoPlayer() {
       streamSessionIdRef.current = null;
     }
 
-    if (channel.tuner_type === "hdhomerun") {
+    const isMusic = mapCategory(channel.group_title || "", channel.name || "") === "Music";
+    const shouldRunFFmpeg = channel.tuner_type === "hdhomerun" || isMusic;
+
+    if (shouldRunFFmpeg) {
       setStatus("Starting stream...");
       fetch(getApiUrl("/api/stream/start"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: channel.stream_url, tuner_type: channel.tuner_type, quality: preferredQuality })
+        body: JSON.stringify({ 
+          url: channel.stream_url, 
+          tuner_type: channel.tuner_type, 
+          quality: channel.tuner_type === "hdhomerun" ? preferredQuality : (isMusic ? "music" : preferredQuality)
+        })
       })
       .then(r => {
         if (!r.ok) throw new Error("Failed to start stream");
@@ -212,6 +219,9 @@ export default function VideoPlayer() {
           fragLoadingMaxRetry: 6,
           liveSyncDurationCount: 3, // Standard 12s HLS latency
           liveMaxLatencyDurationCount: 15,
+          stretchShortVideoTrack: true,
+          maxAudioFramesDrift: 100000,
+          appendErrorMaxRetry: 3,
         });
         hlsRef.current = hls;
         hls.loadSource(url);
@@ -444,7 +454,7 @@ export default function VideoPlayer() {
       >
         <div className="h-48 bg-gradient-to-b from-black/90 via-black/40 to-transparent flex items-start p-6 md:p-8">
           {channel && (
-            <div className="pointer-events-auto flex items-center gap-4">
+            <div className="pointer-events-auto flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
               <button 
                 onClick={(e) => { e.stopPropagation(); navigate(backUrl); }}
                 className="p-3 bg-neutral-900/50 hover:bg-neutral-800 text-white rounded-full backdrop-blur-sm transition-colors flex items-center justify-center mr-2 shadow-lg cursor-pointer"
@@ -470,7 +480,7 @@ export default function VideoPlayer() {
 
         {/* Custom Bottom Controls */}
         <div className="h-48 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex items-end p-6 md:p-8">
-          <div className="w-full flex items-center justify-between pointer-events-auto">
+          <div className="w-full flex items-center justify-between pointer-events-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-4 md:gap-6">
               <button 
                 onClick={togglePlay} 
@@ -524,7 +534,10 @@ export default function VideoPlayer() {
                   </button>
                   
                   {showQualityMenu && (
-                    <div className="absolute bottom-full right-0 mb-4 w-56 bg-neutral-900/95 backdrop-blur-xl border border-neutral-700/50 rounded-2xl p-2 shadow-2xl flex flex-col gap-1 z-50 pointer-events-auto">
+                    <div 
+                      className="absolute bottom-full right-0 mb-4 w-56 bg-neutral-900/95 backdrop-blur-xl border border-neutral-700/50 rounded-2xl p-2 shadow-2xl flex flex-col gap-1 z-50 pointer-events-auto"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <div className="text-xs font-semibold text-neutral-400 px-3 py-2 uppercase tracking-wider">
                         Quality {isTesting ? "(Testing network...)" : (speedMbps ? `(Auto: ${Math.round(speedMbps)} Mbps)` : "")}
                       </div>

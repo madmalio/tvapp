@@ -283,20 +283,32 @@ func proxyStreamHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	ct := strings.ToLower(resp.Header.Get("Content-Type"))
+	isHLS := strings.Contains(ct, "mpegurl") || strings.Contains(ct, "apple")
 
-	ct := resp.Header.Get("Content-Type")
-	isHLS := strings.Contains(ct, "mpegurl") || strings.Contains(ct, "apple") || bytes.HasPrefix(body, []byte("#EXTM3U"))
-
+	var body []byte
 	if !isHLS {
-		for _, h := range []string{"Content-Type", "Content-Length", "Accept-Ranges", "Cache-Control", "Last-Modified", "ETag", "Set-Cookie"} {
-			if v := resp.Header.Get(h); v != "" {
-				w.Header().Set(h, v)
+		buf := make([]byte, 7)
+		n, _ := io.ReadFull(resp.Body, buf)
+		if string(buf[:n]) == "#EXTM3U" {
+			isHLS = true
+			rest, _ := io.ReadAll(resp.Body)
+			body = append(buf[:n], rest...)
+		} else {
+			for _, h := range []string{"Content-Type", "Accept-Ranges", "Cache-Control", "Last-Modified", "ETag", "Set-Cookie"} {
+				if v := resp.Header.Get(h); v != "" {
+					w.Header().Set(h, v)
+				}
 			}
+			w.WriteHeader(resp.StatusCode)
+			if n > 0 {
+				w.Write(buf[:n])
+			}
+			io.Copy(w, resp.Body)
+			return
 		}
-		w.WriteHeader(resp.StatusCode)
-		w.Write(body)
-		return
+	} else {
+		body, _ = io.ReadAll(resp.Body)
 	}
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")

@@ -22,6 +22,7 @@ type Session struct {
 	TunerType string
 	Quality   string
 	Dir       string
+	RawURL    string
 	URL       string
 	CreatedAt time.Time
 	LastUsed  time.Time
@@ -94,6 +95,7 @@ func Start(rawURL string, tunerType string, quality string) (*Session, error) {
 	sess := &Session{
 		ID:        id,
 		Dir:       dir,
+		RawURL:    rawURL,
 		URL:       streamURL,
 		TunerType: tunerType,
 		Quality:   quality,
@@ -202,6 +204,14 @@ func (s *Session) runLoop() {
 		s.mu.Unlock()
 
 		streamURL := s.URL
+		if s.TunerType != "hdhomerun" {
+			// Re-resolve the token from the original M3U master playlist in case it expired
+			prefetchCookies(s.RawURL)
+			streamURL = resolveStreamURL(s.RawURL)
+			s.mu.Lock()
+			s.URL = streamURL
+			s.mu.Unlock()
+		}
 
 		videoArgs := []string{"-c:v", "copy"}
 		if s.TunerType == "hdhomerun" {
@@ -211,26 +221,46 @@ func (s *Session) runLoop() {
 		rtspURL := fmt.Sprintf("rtsp://localhost:8554/%s", s.ID)
 
 		headers := ffmpegHeaders(streamURL)
+
+		analyzeSize := "1000000"
+		if s.Quality == "music" {
+			analyzeSize = "5000000"
+		}
+
 		args := []string{
 			"-user_agent", userAgent,
 			"-headers", headers,
 			"-err_detect", "ignore_err",
-			"-analyzeduration", "1000000",
-			"-probesize", "1000000",
+			"-analyzeduration", analyzeSize,
+			"-probesize", analyzeSize,
 			"-i", streamURL,
 			"-sn",
 		}
 		args = append(args, videoArgs...)
-		args = append(args,
-			"-c:a", "aac",
-			"-b:a", "128k",
-			"-ac", "2",
-			"-f", "rtsp",
-			"-rtsp_transport", "tcp",
-			"-pkt_size", "1200",
-			"-loglevel", "warning",
-			rtspURL,
-		)
+		
+		if s.Quality == "music" {
+			args = append(args,
+				"-c:a", "aac",
+				"-b:a", "192k",
+				"-ac", "2",
+				"-max_muxing_queue_size", "1024",
+				"-f", "rtsp",
+				"-rtsp_transport", "tcp",
+				"-loglevel", "warning",
+				rtspURL,
+			)
+		} else {
+			args = append(args,
+				"-c:a", "aac",
+				"-b:a", "128k",
+				"-ac", "2",
+				"-f", "rtsp",
+				"-rtsp_transport", "tcp",
+				"-pkt_size", "1200",
+				"-loglevel", "warning",
+				rtspURL,
+			)
+		}
 
 		cmd := exec.Command("ffmpeg", args...)
 		cmd.Dir = s.Dir
