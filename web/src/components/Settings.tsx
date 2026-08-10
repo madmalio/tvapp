@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Server, Settings as SettingsIcon, Video, HardDrive, Sliders, Tv, Radio, Plus, Trash2, Edit2, RefreshCw } from "lucide-react";
+import { Server, Settings as SettingsIcon, Video, HardDrive, Sliders, Tv, Radio, Plus, Trash2, Edit2, RefreshCw, GripVertical } from "lucide-react";
 import { getApiUrl, clearApiCache } from "../lib/api";
 import { useApi } from "../hooks/useApi";
 
@@ -13,6 +13,8 @@ export default function Settings() {
   const { data: sources, refetch: refetchSources } = useApi<Source[]>('/api/sources');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+  const [draggableId, setDraggableId] = useState<number | null>(null);
   
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -76,6 +78,35 @@ export default function Settings() {
       setLoading(false);
     }
   }
+
+  const handleDrop = async (e: React.DragEvent, dropIdx: number) => {
+    e.preventDefault();
+    if (draggedIdx === null || draggedIdx === dropIdx || !sources) return;
+
+    const newSources = [...sources];
+    const [draggedItem] = newSources.splice(draggedIdx, 1);
+    newSources.splice(dropIdx, 0, draggedItem);
+    
+    setLoading(true);
+    try {
+      const ids = newSources.map(s => s.id);
+      const res = await fetch(getApiUrl("/api/sources/order"), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ids)
+      });
+      if (!res.ok) throw new Error("Failed to save order");
+      
+      clearApiCache();
+      refetchSources();
+      setMessage("Source order saved.");
+    } catch (err: any) {
+      setMessage(`Error: ${err.message}`);
+    } finally {
+      setLoading(false);
+      setDraggedIdx(null);
+    }
+  };
 
   const tabs = [
     { id: 'iptv', label: 'IPTV & Tuners', icon: Tv },
@@ -156,10 +187,30 @@ export default function Settings() {
                 </div>
               ) : (
                 <div className="grid gap-4">
-                  {sources.map(src => (
-                    <div key={src.id} className="bg-neutral-800/50 backdrop-blur-md rounded-xl p-5 border border-neutral-700/50 shadow-xl shadow-black/20 flex items-center justify-between group hover:border-blue-500/30 transition-colors">
-                      <div className="flex items-center gap-4">
-                        <div className={`p-3 rounded-lg ${src.type === 'hdhomerun' ? 'bg-green-500/10 text-green-400' : 'bg-purple-500/10 text-purple-400'}`}>
+                  {sources.map((src, idx) => (
+                    <div 
+                      key={src.id} 
+                      draggable={draggableId === src.id}
+                      onDragStart={(e) => {
+                        setDraggedIdx(idx);
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                      }}
+                      onDrop={(e) => handleDrop(e, idx)}
+                      className={`bg-neutral-800/50 backdrop-blur-md rounded-xl p-3 md:p-5 border shadow-xl shadow-black/20 flex items-center justify-between group transition-colors ${draggedIdx === idx ? 'border-blue-500 opacity-50' : 'border-neutral-700/50 hover:border-blue-500/30'}`}
+                    >
+                      <div className="flex items-center gap-2 md:gap-4 pointer-events-none">
+                        <div 
+                          className="cursor-move p-1 md:p-2 text-neutral-600 hover:text-white transition-colors pointer-events-auto"
+                          onMouseEnter={() => setDraggableId(src.id)}
+                          onMouseLeave={() => setDraggableId(null)}
+                        >
+                          <GripVertical className="w-5 h-5" />
+                        </div>
+                        <div className={`p-2 md:p-3 rounded-lg ${src.type === 'hdhomerun' ? 'bg-green-500/10 text-green-400' : 'bg-purple-500/10 text-purple-400'}`}>
                           {src.type === 'hdhomerun' ? <Server className="w-6 h-6" /> : <Radio className="w-6 h-6" />}
                         </div>
                         <div>
