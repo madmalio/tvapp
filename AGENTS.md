@@ -20,6 +20,8 @@ go build -o bin\tvapp.exe .\cmd\server\
 ## Run
 
 > **Note to Agents:** DO NOT run the dev servers or start commands in the background. The user will run these commands manually in their own terminals to maintain control of the development environment.
+>
+> **Important Docker Note**: `tvapp` currently starts MediaMTX automatically as a child process. When building the `docker-compose` stack in the future, we MUST revert this behavior in `cmd/server/main.go` so that `tvapp` and MediaMTX run in separate isolated containers.
 
 ```powershell
 # Binary (uses embedded frontend)

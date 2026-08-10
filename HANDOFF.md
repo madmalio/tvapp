@@ -64,6 +64,8 @@ scp .\bin\tvapp-linux mark@192.168.4.143:~/tvapp/tvapp
 # 3. Wait for user to manually restart the process on the server
 ```
 
+> **Note on Containerization**: `tvapp` currently spawns MediaMTX automatically as a child process. When writing the docker-compose stack in the future, this behavior in `cmd/server/main.go` MUST be reverted so they run as separate isolated containers.
+
 ## Key Files
 
 | File | Purpose |
