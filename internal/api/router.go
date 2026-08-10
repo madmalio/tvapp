@@ -235,6 +235,15 @@ func proxyStreamHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Only proxy known domains that require it (like PlutoTV) to bypass CORS and rewrite segment keys.
+	// For other domains (like Tubi), we redirect to let the browser play the stream directly,
+	// which offloads the backend and prevents stream freezing.
+	lowerTarget := strings.ToLower(target)
+	if !strings.Contains(lowerTarget, "pluto") && !strings.Contains(lowerTarget, "jmp2.uk") {
+		http.Redirect(w, r, target, http.StatusFound)
+		return
+	}
+
 	proxyReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
