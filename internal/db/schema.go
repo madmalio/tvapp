@@ -73,6 +73,7 @@ func migrate() error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_epg_channel_time ON epg_entries(channel_id, start_time, end_time);
+	CREATE INDEX IF NOT EXISTS idx_epg_time ON epg_entries(end_time, start_time);
 	CREATE INDEX IF NOT EXISTS idx_channel_source ON channels(source_id);
 	`
 	_, err := conn.Exec(schema)
