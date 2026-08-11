@@ -96,6 +96,8 @@ func listDevicesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func listChannelsHandler(w http.ResponseWriter, r *http.Request) {
+	TriggerGlobalSync()
+	
 	channels, err := db.GetChannels()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

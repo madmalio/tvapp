@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -322,26 +323,34 @@ func parseSource(s db.SourceRow) {
 	}
 }
 
-func StartSourceSyncLoop() {
+var (
+	lastGlobalSync time.Time
+	syncMu         sync.Mutex
+)
+
+// TriggerGlobalSync runs a background sync of all sources if more than 12 hours have passed since the last sync.
+func TriggerGlobalSync() {
+	syncMu.Lock()
+	defer syncMu.Unlock()
+
+	if time.Since(lastGlobalSync) < 12*time.Hour {
+		return
+	}
+	
+	// If it's the absolute first boot, give the server 10 seconds to fully spin up
+	// before locking the DB, to ensure the frontend loads instantly.
+	isFirstBoot := lastGlobalSync.IsZero()
+	lastGlobalSync = time.Now()
+
 	go func() {
-		// Wait a few seconds for the server to fully boot
-		time.Sleep(2 * time.Second)
+		if isFirstBoot {
+			time.Sleep(10 * time.Second)
+		}
 		
-		log.Println("[sync] performing initial source sync on boot...")
+		log.Println("[sync] performing background source sync...")
 		if sources, err := db.GetSources(); err == nil {
 			for _, s := range sources {
 				parseSource(s)
-			}
-		}
-
-		// Sync every 12 hours
-		ticker := time.NewTicker(12 * time.Hour)
-		for range ticker.C {
-			log.Println("[sync] performing scheduled source sync...")
-			if sources, err := db.GetSources(); err == nil {
-				for _, s := range sources {
-					parseSource(s)
-				}
 			}
 		}
 	}()
