@@ -42,6 +42,8 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 	r.Delete("/api/sources/{id}", deleteSourceHandler)
 	r.Get("/api/epg", getEpgHandler)
 	r.Get("/api/speedtest", speedtestHandler)
+	r.Get("/api/settings", getSettingsHandler)
+	r.Put("/api/settings", updateSettingsHandler)
 	r.Post("/api/stream/start", startStreamHandler)
 	r.Delete("/api/stream/stop/{id}", stopStreamHandler)
 	r.Get("/api/stream/hls/*", serveHLSHandler)
@@ -96,8 +98,6 @@ func listDevicesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func listChannelsHandler(w http.ResponseWriter, r *http.Request) {
-	TriggerGlobalSync()
-	
 	channels, err := db.GetChannels()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -720,4 +720,34 @@ func serveHLSHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
+}
+
+func getSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	settings, err := db.GetAllSettings()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if settings == nil {
+		settings = make(map[string]string)
+	}
+	// Defaults
+	if _, ok := settings["epg_sync_time"]; !ok {
+		settings["epg_sync_time"] = "03:00"
+	}
+	json.NewEncoder(w).Encode(settings)
+}
+
+func updateSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	var settings map[string]string
+	if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	for k, v := range settings {
+		db.SetSetting(k, v)
+	}
+	// Notify the background sync worker that settings changed
+	ReloadSyncTimer()
+	w.WriteHeader(http.StatusNoContent)
 }

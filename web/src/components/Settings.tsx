@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Server, Settings as SettingsIcon, Video, HardDrive, Sliders, Tv, Radio, Plus, Trash2, Edit2, RefreshCw, GripVertical } from "lucide-react";
 import { getApiUrl, clearApiCache } from "../lib/api";
 import { useApi } from "../hooks/useApi";
@@ -25,6 +25,7 @@ export default function Settings() {
 
   // Server State
   const [serverIp, setServerIp] = useState(localStorage.getItem('tvapp_server_ip') || "");
+  const [epgSyncTime, setEpgSyncTime] = useState("03:00");
   const [ffmpegPath, setFfmpegPath] = useState("");
   const [refreshInterval, setRefreshInterval] = useState("15");
 
@@ -36,6 +37,35 @@ export default function Settings() {
   // Preferences State
   const [defaultLaunch, setDefaultLaunch] = useState("guide");
   const [defaultVolume, setDefaultVolume] = useState("50");
+
+  // Load backend settings
+  useEffect(() => {
+    fetch(getApiUrl("/api/settings"))
+      .then(r => r.json())
+      .then(data => {
+        if (data.epg_sync_time) setEpgSyncTime(data.epg_sync_time);
+      })
+      .catch(console.error);
+  }, []);
+
+  async function saveServerSettings() {
+    setLoading(true);
+    try {
+      const res = await fetch(getApiUrl("/api/settings"), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          epg_sync_time: epgSyncTime
+        })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setMessage("Server settings saved.");
+    } catch (err: any) {
+      setMessage(`Error: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function saveSource(e: React.FormEvent) {
     e.preventDefault();
@@ -288,6 +318,17 @@ export default function Settings() {
                   </div>
 
                   <div>
+                    <label className="block text-sm font-medium text-neutral-400 mb-1.5">Nightly Background Sync Time</label>
+                    <input
+                      type="time"
+                      value={epgSyncTime}
+                      onChange={(e) => setEpgSyncTime(e.target.value)}
+                      className="w-full bg-neutral-900/80 border border-neutral-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                    />
+                    <p className="text-xs text-neutral-500 mt-2">The time of day when channels and EPG data are automatically refreshed.</p>
+                  </div>
+
+                  <div>
                     <label className="block text-sm font-medium text-neutral-400 mb-1.5">Playlist Refresh Interval (Minutes)</label>
                     <input
                       type="number"
@@ -311,8 +352,12 @@ export default function Settings() {
                 </div>
                 
                 <div className="mt-6 pt-6 border-t border-neutral-700/50 flex justify-end">
-                  <button className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-6 py-2.5 rounded-lg transition-all">
-                    Save Changes
+                  <button 
+                    onClick={saveServerSettings}
+                    disabled={loading}
+                    className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-6 py-2.5 rounded-lg transition-all"
+                  >
+                    {loading ? "Saving..." : "Save Changes"}
                   </button>
                 </div>
               </div>

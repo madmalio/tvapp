@@ -322,34 +322,47 @@ func parseSource(s db.SourceRow) {
 }
 
 var (
-	lastGlobalSync time.Time
-	syncMu         sync.Mutex
+	syncTimer *time.Timer
+	syncMu    sync.Mutex
 )
 
-// TriggerGlobalSync runs a background sync of all sources if more than 12 hours have passed since the last sync.
-func TriggerGlobalSync() {
+func getNextSyncDuration() time.Duration {
+	timeStr := db.GetSetting("epg_sync_time", "03:00")
+	parts := strings.Split(timeStr, ":")
+	hour, _ := strconv.Atoi(parts[0])
+	min, _ := strconv.Atoi(parts[1])
+
+	now := time.Now()
+	next := time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, now.Location())
+	
+	if next.Before(now) {
+		next = next.Add(24 * time.Hour)
+	}
+	return next.Sub(now)
+}
+
+func StartNightlySync() {
 	syncMu.Lock()
 	defer syncMu.Unlock()
 
-	if time.Since(lastGlobalSync) < 12*time.Hour {
-		return
+	if syncTimer != nil {
+		syncTimer.Stop()
 	}
-	
-	// If it's the absolute first boot, give the server 10 seconds to fully spin up
-	// before locking the DB, to ensure the frontend loads instantly.
-	isFirstBoot := lastGlobalSync.IsZero()
-	lastGlobalSync = time.Now()
 
-	go func() {
-		if isFirstBoot {
-			time.Sleep(10 * time.Second)
-		}
-		
-		log.Println("[sync] performing background source sync...")
+	d := getNextSyncDuration()
+	log.Printf("[sync] scheduled next nightly sync in %v (at %s)", d.Round(time.Minute), time.Now().Add(d).Format("15:04"))
+
+	syncTimer = time.AfterFunc(d, func() {
+		log.Println("[sync] performing nightly background source sync...")
 		if sources, err := db.GetSources(); err == nil {
 			for _, s := range sources {
 				parseSource(s)
 			}
 		}
-	}()
+		StartNightlySync() // Reschedule for next day
+	})
+}
+
+func ReloadSyncTimer() {
+	StartNightlySync()
 }

@@ -48,6 +48,8 @@ func main() {
 
 	mtxCmd := startMediaMTX()
 
+	api.StartNightlySync()
+
 	go func() {
 		quit := make(chan os.Signal, 1)
 		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

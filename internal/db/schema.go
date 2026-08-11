@@ -67,6 +67,11 @@ func migrate() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
+	CREATE TABLE IF NOT EXISTS settings (
+		key   TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_epg_channel_time ON epg_entries(channel_id, start_time, end_time);
 	CREATE INDEX IF NOT EXISTS idx_channel_source ON channels(source_id);
 	`
@@ -436,4 +441,35 @@ func GetEPGEntriesByTime(start string, end string) ([]EPGEntryRow, error) {
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+func GetSetting(key string, defaultValue string) string {
+	var val string
+	err := conn.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&val)
+	if err == sql.ErrNoRows || err != nil {
+		return defaultValue
+	}
+	return val
+}
+
+func SetSetting(key string, value string) error {
+	_, err := conn.Exec(`INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
+	return err
+}
+
+func GetAllSettings() (map[string]string, error) {
+	rows, err := conn.Query(`SELECT key, value FROM settings`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	settings := make(map[string]string)
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err == nil {
+			settings[k] = v
+		}
+	}
+	return settings, nil
 }
