@@ -27,7 +27,6 @@ export default function Settings() {
   const [serverIp, setServerIp] = useState(localStorage.getItem('tvapp_server_ip') || "");
   const [epgSyncTime, setEpgSyncTime] = useState("03:00");
   const [ffmpegPath, setFfmpegPath] = useState("");
-  const [refreshInterval, setRefreshInterval] = useState("15");
 
   // DVR State (Placeholders)
   const [dvrPath, setDvrPath] = useState("");
@@ -326,16 +325,6 @@ export default function Settings() {
                       className="w-full bg-neutral-900/80 border border-neutral-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
                     />
                     <p className="text-xs text-neutral-500 mt-2">The time of day when channels and EPG data are automatically refreshed.</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-neutral-400 mb-1.5">Playlist Refresh Interval (Minutes)</label>
-                    <input
-                      type="number"
-                      value={refreshInterval}
-                      onChange={(e) => setRefreshInterval(e.target.value)}
-                      className="w-full bg-neutral-900/80 border border-neutral-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
-                    />
                   </div>
 
                   <div>
