@@ -30,6 +30,21 @@ func getSourcesHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(sources)
 }
 
+func updateSourceOrderHandler(w http.ResponseWriter, r *http.Request) {
+	var ids []int
+	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+
+	if err := db.UpdateSourceOrder(ids); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func addSourceHandler(w http.ResponseWriter, r *http.Request) {
 	var s db.SourceRow
 	if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
@@ -305,4 +320,29 @@ func parseSource(s db.SourceRow) {
 		db.SaveEPGEntries(epgRows)
 		log.Printf("[source:%d] loaded %d hdhomerun epg entries", s.ID, len(epgRows))
 	}
+}
+
+func StartSourceSyncLoop() {
+	go func() {
+		// Wait a few seconds for the server to fully boot
+		time.Sleep(2 * time.Second)
+		
+		log.Println("[sync] performing initial source sync on boot...")
+		if sources, err := db.GetSources(); err == nil {
+			for _, s := range sources {
+				parseSource(s)
+			}
+		}
+
+		// Sync every 12 hours
+		ticker := time.NewTicker(12 * time.Hour)
+		for range ticker.C {
+			log.Println("[sync] performing scheduled source sync...")
+			if sources, err := db.GetSources(); err == nil {
+				for _, s := range sources {
+					parseSource(s)
+				}
+			}
+		}
+	}()
 }

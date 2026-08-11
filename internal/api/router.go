@@ -37,6 +37,7 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 	r.Get("/api/proxy", proxyStreamHandler)
 	r.Get("/api/sources", getSourcesHandler)
 	r.Post("/api/sources", addSourceHandler)
+	r.Put("/api/sources/order", updateSourceOrderHandler)
 	r.Put("/api/sources/{id}", updateSourceHandler)
 	r.Delete("/api/sources/{id}", deleteSourceHandler)
 	r.Get("/api/epg", getEpgHandler)
