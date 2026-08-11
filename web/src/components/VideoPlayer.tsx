@@ -223,8 +223,6 @@ export default function VideoPlayer() {
           fragLoadingMaxRetry: 6,
           liveSyncDurationCount: 3, // Standard 12s HLS latency
           liveMaxLatencyDurationCount: 15,
-          stretchShortVideoTrack: true,
-          maxAudioFramesDrift: 100000,
           appendErrorMaxRetry: 3,
         });
         hlsRef.current = hls;
