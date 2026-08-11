@@ -130,9 +130,8 @@ func parseSource(s db.SourceRow) {
 			}
 		}
 
-		db.ClearChannelsForSource(s.ID)
-		if err := db.SaveChannels(rows); err != nil {
-			log.Printf("[source:%d] save channels failed: %v", s.ID, err)
+		if err := db.SyncChannels(s.ID, rows); err != nil {
+			log.Printf("[source:%d] sync channels failed: %v", s.ID, err)
 			return
 		}
 		log.Printf("[source:%d] loaded %d channels", s.ID, len(rows))
@@ -192,9 +191,8 @@ func parseSource(s db.SourceRow) {
 			}
 		}
 
-		db.ClearChannelsForSource(s.ID)
-		if err := db.SaveChannels(rows); err != nil {
-			log.Printf("[source:%d] save channels failed: %v", s.ID, err)
+		if err := db.SyncChannels(s.ID, rows); err != nil {
+			log.Printf("[source:%d] sync channels failed: %v", s.ID, err)
 			return
 		}
 		log.Printf("[source:%d] loaded %d hdhomerun channels", s.ID, len(rows))
