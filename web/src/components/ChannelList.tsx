@@ -170,6 +170,7 @@ export default function ChannelList() {
   }, [activeSourceId, activeCategory]);
 
   const [epgData, setEpgData] = useState<EPGEntry[]>([]);
+  const [epgLoaded, setEpgLoaded] = useState(false);
   
   useEffect(() => {
     if (heroChannel && !hoveredChannel) {
@@ -186,8 +187,14 @@ export default function ChannelList() {
     const end = new Date(now.getTime() + 1 * 60 * 60 * 1000).toISOString();
     
     fetchWithCache(getApiUrl(`/api/epg?start=${start}&end=${end}`))
-      .then(data => setEpgData(data || []))
-      .catch(console.error);
+      .then(data => {
+        setEpgData(data || []);
+        setEpgLoaded(true);
+      })
+      .catch(err => {
+        console.error(err);
+        setEpgLoaded(true);
+      });
   }, []);
 
   const heroProgram = useMemo(() => {
@@ -200,8 +207,8 @@ export default function ChannelList() {
     ) || null;
   }, [activeHeroChannel, epgData]);
 
-  const isFetchingProgram = false;
-  const heroReady = true;
+  const isFetchingProgram = !epgLoaded;
+  const heroReady = epgLoaded;
 
   if (loading || !heroReady) {
     return (
