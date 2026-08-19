@@ -26,14 +26,9 @@ function CameraPlayer({ source }: { source: SourceRow }) {
 
     const pathName = sanitizePathName(`cam_${source.id}_${source.name}`);
     
-    // MediaMTX exposes HLS directly on port 8888. We construct the URL
-    // using the API host to ensure it points to the server, not localhost.
-    let base = getApiUrl("");
-    if (!base) base = window.location.origin;
-    
-    // Replace the port with 8888
-    const hostParts = base.split(":");
-    const streamUrl = `${hostParts[0]}:${hostParts[1]}:8888/${pathName}/index.m3u8`;
+    // Proxy the MediaMTX stream through the backend to avoid firewall issues
+    const targetUrl = `http://127.0.0.1:8888/${pathName}/index.m3u8`;
+    const streamUrl = getApiUrl(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
 
     let hls: Hls | null = null;
 

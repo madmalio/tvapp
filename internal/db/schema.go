@@ -85,7 +85,7 @@ func migrate() error {
 	conn.Exec(`ALTER TABLE sources ADD COLUMN sort_order INTEGER DEFAULT 0`)
 
 	// Clean up old RTSP channels from previous implementation
-	conn.Exec(`DELETE FROM channels WHERE tuner_type = 'rtsp'`)
+	conn.Exec(`DELETE FROM channels WHERE tuner_type = 'rtsp' OR group_title = 'Cameras' OR source_id IN (SELECT id FROM sources WHERE type = 'rtsp')`)
 
 	log.Println("database migrated to multi-source schema")
 	return nil

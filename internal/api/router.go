@@ -242,7 +242,8 @@ func proxyStreamHandler(w http.ResponseWriter, r *http.Request) {
 	// For other domains (like Tubi), we redirect to let the browser play the stream directly,
 	// which offloads the backend and prevents stream freezing.
 	lowerTarget := strings.ToLower(target)
-	if !strings.Contains(lowerTarget, "pluto") && !strings.Contains(lowerTarget, "jmp2.uk") {
+	isMediaMTX := strings.Contains(lowerTarget, "127.0.0.1:8888") || strings.Contains(lowerTarget, "localhost:8888")
+	if !strings.Contains(lowerTarget, "pluto") && !strings.Contains(lowerTarget, "jmp2.uk") && !isMediaMTX {
 		http.Redirect(w, r, target, http.StatusFound)
 		return
 	}
