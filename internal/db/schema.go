@@ -84,6 +84,9 @@ func migrate() error {
 	// Ensure sort_order exists
 	conn.Exec(`ALTER TABLE sources ADD COLUMN sort_order INTEGER DEFAULT 0`)
 
+	// Clean up old RTSP channels from previous implementation
+	conn.Exec(`DELETE FROM channels WHERE tuner_type = 'rtsp'`)
+
 	log.Println("database migrated to multi-source schema")
 	return nil
 }
