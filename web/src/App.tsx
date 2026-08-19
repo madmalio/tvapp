@@ -4,6 +4,7 @@ import ChannelList from "./components/ChannelList";
 import EpgGrid from "./components/EpgGrid";
 import VideoPlayer from "./components/VideoPlayer";
 import Settings from "./components/Settings";
+import Cameras from "./components/Cameras";
 import { useSpeedTest } from "./hooks/useSpeedTest";
 
 export default function App() {
@@ -18,6 +19,7 @@ export default function App() {
         <Routes>
           <Route path="/channels" element={<ChannelList />} />
           <Route path="/guide" element={<EpgGrid />} />
+          <Route path="/cameras" element={<Cameras />} />
           <Route path="/player/:channelId" element={<VideoPlayer />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/channels" replace />} />

@@ -377,23 +377,6 @@ func parseSource(s db.SourceRow) {
 		log.Printf("[source:%d] loaded %d hdhomerun epg entries", s.ID, len(epgRows))
 	} else if s.Type == "rtsp" {
 		pathName := sanitizePathName(fmt.Sprintf("cam_%d_%s", s.ID, s.Name))
-		
-		rows := []db.ChannelRow{
-			{
-				SourceID:   s.ID,
-				Name:       s.Name,
-				StreamURL:  fmt.Sprintf("http://127.0.0.1:8888/%s/index.m3u8", pathName),
-				GroupTitle: "Cameras",
-				TunerType:  "rtsp",
-				LogoURL:    s.EpgURL, // Repurposed for thumbnail
-			},
-		}
-
-		if err := db.SyncChannels(s.ID, rows); err != nil {
-			log.Printf("[source:%d] sync channels failed: %v", s.ID, err)
-			return
-		}
-		
 		registerMediaMTXPath(pathName, s.URL)
 	}
 }
