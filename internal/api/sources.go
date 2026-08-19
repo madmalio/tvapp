@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,57 @@ import (
 	"tvapp/internal/hdhomerun"
 	"tvapp/internal/iptv"
 )
+
+var nonAlphanumericRegex = regexp.MustCompile(`[^a-zA-Z0-9]+`)
+
+func sanitizePathName(name string) string {
+	return nonAlphanumericRegex.ReplaceAllString(strings.ToLower(name), "")
+}
+
+func registerMediaMTXPath(name string, sourceUrl string) {
+	payload := fmt.Sprintf(`{"source": "%s"}`, sourceUrl)
+	req, err := http.NewRequest("POST", "http://127.0.0.1:9997/v3/config/paths/add/"+name, strings.NewReader(payload))
+	if err != nil {
+		log.Printf("[rtsp] error creating req for %s: %v", name, err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("[rtsp] error registering %s: %v", name, err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		log.Printf("[rtsp] warning: mediamtx returned status %d for %s", resp.StatusCode, name)
+	} else {
+		log.Printf("[rtsp] registered path %s", name)
+	}
+}
+
+func deleteMediaMTXPath(name string) {
+	req, err := http.NewRequest("DELETE", "http://127.0.0.1:9997/v3/config/paths/delete/"+name, nil)
+	if err != nil {
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err == nil {
+		resp.Body.Close()
+	}
+}
+
+func RegisterAllRTSPCameras() {
+	sources, err := db.GetSources()
+	if err != nil {
+		return
+	}
+	for _, s := range sources {
+		if s.Type == "rtsp" {
+			pathName := sanitizePathName(fmt.Sprintf("cam_%d_%s", s.ID, s.Name))
+			registerMediaMTXPath(pathName, s.URL)
+		}
+	}
+}
 
 func getSourcesHandler(w http.ResponseWriter, r *http.Request) {
 	sources, err := db.GetSources()
@@ -98,6 +150,11 @@ func deleteSourceHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
+	}
+
+	if source, err := db.GetSource(id); err == nil && source.Type == "rtsp" {
+		pathName := sanitizePathName(fmt.Sprintf("cam_%d_%s", source.ID, source.Name))
+		deleteMediaMTXPath(pathName)
 	}
 
 	if err := db.DeleteSource(id); err != nil {
@@ -318,6 +375,26 @@ func parseSource(s db.SourceRow) {
 		db.ClearEPGEntriesForSource(s.ID)
 		db.SaveEPGEntries(epgRows)
 		log.Printf("[source:%d] loaded %d hdhomerun epg entries", s.ID, len(epgRows))
+	} else if s.Type == "rtsp" {
+		pathName := sanitizePathName(fmt.Sprintf("cam_%d_%s", s.ID, s.Name))
+		
+		rows := []db.ChannelRow{
+			{
+				SourceID:   s.ID,
+				Name:       s.Name,
+				StreamURL:  fmt.Sprintf("http://127.0.0.1:8888/%s/index.m3u8", pathName),
+				GroupTitle: "Cameras",
+				TunerType:  "rtsp",
+				LogoURL:    s.EpgURL, // Repurposed for thumbnail
+			},
+		}
+
+		if err := db.SyncChannels(s.ID, rows); err != nil {
+			log.Printf("[source:%d] sync channels failed: %v", s.ID, err)
+			return
+		}
+		
+		registerMediaMTXPath(pathName, s.URL)
 	}
 }
 

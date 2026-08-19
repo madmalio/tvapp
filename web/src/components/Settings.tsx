@@ -183,6 +183,11 @@ export default function Settings() {
       <div className="flex-1 overflow-y-auto custom-scrollbar p-8">
         <div className="max-w-3xl space-y-8 pb-20">
           
+          {(() => {
+            const iptvSources = sources?.filter(s => s.type !== 'rtsp') || [];
+            const rtspSources = sources?.filter(s => s.type === 'rtsp') || [];
+            return (
+              <>
           {/* Notification Toast */}
           {message && (
             <div className="bg-blue-900/20 border border-blue-500/30 text-blue-300 rounded-xl px-4 py-3 text-sm flex items-center shadow-lg shadow-blue-900/10">
@@ -209,14 +214,14 @@ export default function Settings() {
                 </button>
               </div>
 
-              {(!sources || sources.length === 0) ? (
+              {iptvSources.length === 0 ? (
                 <div className="bg-neutral-800/30 border border-neutral-700/50 border-dashed rounded-2xl p-12 text-center">
                   <Tv className="w-12 h-12 text-neutral-600 mx-auto mb-4" />
                   <p className="text-neutral-400">No sources configured yet. Add an IPTV playlist or HDHomeRun tuner to get started.</p>
                 </div>
               ) : (
                 <div className="grid gap-4">
-                  {sources.map((src, idx) => (
+                  {iptvSources.map((src, idx) => (
                     <div 
                       key={src.id} 
                       draggable={draggableId === src.id}
@@ -356,11 +361,58 @@ export default function Settings() {
           {/* RTSP Tab */}
           {activeTab === 'rtsp' && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-              <div className="bg-neutral-800/50 backdrop-blur-md rounded-2xl p-6 border border-neutral-700/50 flex flex-col items-center justify-center text-center py-12">
-                <Video className="w-16 h-16 text-neutral-600 mb-4" />
-                <h3 className="text-xl font-medium text-neutral-300 mb-2">RTSP Security Cameras</h3>
-                <p className="text-neutral-500 max-w-md">Connect and manage local security cameras to view them directly on your TV. This feature is coming in a future update.</p>
+              
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-semibold text-white">Security Cameras</h3>
+                <button
+                  onClick={() => { setFormSource({ type: 'rtsp' }); setShowAddModal(true); }}
+                  className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Camera
+                </button>
               </div>
+
+              {rtspSources.length === 0 ? (
+                <div className="bg-neutral-800/30 border border-neutral-700/50 border-dashed rounded-2xl p-12 text-center">
+                  <Video className="w-12 h-12 text-neutral-600 mx-auto mb-4" />
+                  <p className="text-neutral-400">No cameras configured yet. Add an RTSP stream to get started.</p>
+                </div>
+              ) : (
+                <div className="grid gap-4">
+                  {rtspSources.map((src) => (
+                    <div 
+                      key={src.id} 
+                      className="bg-neutral-800/50 backdrop-blur-md rounded-xl p-3 md:p-5 border border-neutral-700/50 hover:border-blue-500/30 shadow-xl shadow-black/20 flex items-center justify-between transition-colors"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="p-3 rounded-lg bg-blue-500/10 text-blue-400">
+                          <Video className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h4 className="text-white font-medium text-lg">{src.name}</h4>
+                          <p className="text-sm text-neutral-400 truncate max-w-md">{src.url}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => { setFormSource(src); setShowAddModal(true); }}
+                          className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-700 rounded-lg transition-colors"
+                        >
+                          <SettingsIcon className="w-5 h-5" />
+                        </button>
+                        <button 
+                          onClick={() => setShowDeleteModal(src.id!)}
+                          className="p-2 text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -458,6 +510,9 @@ export default function Settings() {
               </div>
             </div>
           )}
+              </>
+            );
+          })()}
 
         </div>
       </div>
@@ -479,29 +534,30 @@ export default function Settings() {
                 >
                   <option value="iptv">IPTV Playlist (M3U)</option>
                   <option value="hdhomerun">HDHomeRun Tuner</option>
+                  <option value="rtsp">RTSP Security Camera</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm text-neutral-400 mb-1.5">Display Name</label>
+                <label className="block text-sm text-neutral-400 mb-1.5">{formSource.type === 'rtsp' ? 'Camera Name' : 'Display Name'}</label>
                 <input
                   type="text"
                   required
                   value={formSource.name || ''}
                   onChange={e => setFormSource({...formSource, name: e.target.value})}
-                  placeholder={formSource.type === 'iptv' ? "e.g. Pluto TV" : "e.g. Local Antenna"}
+                  placeholder={formSource.type === 'iptv' ? "e.g. Pluto TV" : formSource.type === 'rtsp' ? "e.g. Front Porch" : "e.g. Local Antenna"}
                   className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
 
               <div>
-                <label className="block text-sm text-neutral-400 mb-1.5">{formSource.type === 'iptv' ? 'M3U Playlist URL' : 'Tuner IP Address (or auto-discovery URL)'}</label>
+                <label className="block text-sm text-neutral-400 mb-1.5">{formSource.type === 'iptv' ? 'M3U Playlist URL' : formSource.type === 'rtsp' ? 'RTSP Stream URL' : 'Tuner IP Address (or auto-discovery URL)'}</label>
                 <input
                   type="text"
                   required
                   value={formSource.url || ''}
                   onChange={e => setFormSource({...formSource, url: e.target.value})}
-                  placeholder={formSource.type === 'iptv' ? "https://..." : "192.168.1.10"}
+                  placeholder={formSource.type === 'iptv' ? "https://..." : formSource.type === 'rtsp' ? "rtsp://user:pass@192.168.1.50/stream1" : "192.168.1.10"}
                   className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
@@ -509,6 +565,19 @@ export default function Settings() {
               {formSource.type === 'iptv' && (
                 <div>
                   <label className="block text-sm text-neutral-400 mb-1.5">XMLTV EPG URL (Optional)</label>
+                  <input
+                    type="url"
+                    value={formSource.epg_url || ''}
+                    onChange={e => setFormSource({...formSource, epg_url: e.target.value})}
+                    placeholder="https://..."
+                    className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              )}
+
+              {formSource.type === 'rtsp' && (
+                <div>
+                  <label className="block text-sm text-neutral-400 mb-1.5">Thumbnail URL (Optional)</label>
                   <input
                     type="url"
                     value={formSource.epg_url || ''}

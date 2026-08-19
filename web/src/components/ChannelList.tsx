@@ -25,7 +25,7 @@ type EPGEntry = {
   end_time: string;
 };
 
-const CATEGORIES = ['All', 'Movies', 'News', 'Sports', 'Kids', 'Entertainment', 'Docs & Learning', 'Music', 'Local', 'Other'];
+const CATEGORIES = ['All', 'Movies', 'News', 'Sports', 'Kids', 'Entertainment', 'Docs & Learning', 'Music', 'Local', 'Cameras', 'Other'];
 
 function mapCategory(rawGroup: string, channelName: string = ""): string {
   if (channelName) {
@@ -42,6 +42,7 @@ function mapCategory(rawGroup: string, channelName: string = ""): string {
   if (lower.match(/doc|history|science|discovery|nature|learning/)) return 'Docs & Learning';
   if (lower.match(/music|mtv|vh1|concert|radio/)) return 'Music';
   if (lower.match(/local|us|uk|region|city/)) return 'Local';
+  if (lower.match(/camera|cctv|rtsp/)) return 'Cameras';
   return 'Other';
 }
 

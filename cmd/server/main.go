@@ -47,6 +47,10 @@ func main() {
 	srv := &http.Server{Addr: ":" + port, Handler: router}
 
 	mtxCmd := startMediaMTX()
+	
+	// Wait a moment for MediaMTX to spin up its API listener
+	time.Sleep(1 * time.Second)
+	api.RegisterAllRTSPCameras()
 
 	api.StartNightlySync()
 
