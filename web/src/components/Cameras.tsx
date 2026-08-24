@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
+import { useEffect, useRef, useState } from "react";
 import { getApiUrl } from "../lib/api";
 import { useApi } from "../hooks/useApi";
-import { Video, AlertCircle } from "lucide-react";
+import { Video, RefreshCw } from "lucide-react";
 
 type SourceRow = {
   id: number;
@@ -16,32 +16,132 @@ function sanitizePathName(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
+import Hls from "hls.js";
+import { useEffect, useRef, useState } from "react";
+import { getApiUrl } from "../lib/api";
+
 function CameraPlayer({ source }: { source: SourceRow }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [streamId, setStreamId] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const [iframeKey, setIframeKey] = useState(0);
+  const [isReady, setIsReady] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const sessionIdRef = useRef<string | null>(null);
+  const hlsRef = useRef<any>(null);
+
+  const [useWebRTC, setUseWebRTC] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(`tvapp_cam_${source.id}_webrtc`) === "true";
+    } catch (e) {
+      return false;
+    }
+  });
+
+  const toggleMode = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newVal = !useWebRTC;
+    
+    setUseWebRTC(newVal);
+    try {
+      localStorage.setItem(`tvapp_cam_${source.id}_webrtc`, newVal.toString());
+    } catch(e) {}
+  };
+
+  const toggleExpand = () => {
+    if (isExpanded && useWebRTC) {
+      setIframeKey(k => k + 1);
+    }
+    setIsExpanded(!isExpanded);
+  };
 
   useEffect(() => {
+    let active = true;
+    setStreamId(null);
+    setIsReady(false);
+    fetch(getApiUrl("/api/stream/start"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: source.url, tuner_type: "rtsp", quality: "720p_std" })
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (!active) {
+        fetch(getApiUrl(`/api/stream/stop/${data.id}`), { method: "DELETE" }).catch(() => {});
+        return;
+      }
+      sessionIdRef.current = data.id;
+      setStreamId(data.id);
+    })
+    .catch(err => setError(err.message));
+
+    return () => {
+      active = false;
+      if (sessionIdRef.current) {
+        fetch(getApiUrl(`/api/stream/stop/${sessionIdRef.current}`), { method: "DELETE" }).catch(() => {});
+        sessionIdRef.current = null;
+      }
+    };
+  }, [source, retryCount]);
+
+  // Wait until the stream is ACTUALLY published in MediaMTX before hiding the loader
+  useEffect(() => {
+    if (!streamId || error) return;
+    
+    let isMounted = true;
+        let attempts = 0;
+    const checkReady = () => {
+      attempts++;
+      if (attempts > 30) {
+        if (isMounted) {
+          setError("Stream failed to start (timed out)");
+        }
+        return;
+      }
+      fetch(getApiUrl(`/api/stream/hls/${streamId}/index.m3u8`), { method: 'GET' })
+        .then(res => {
+          if (res.ok && isMounted) {
+            setIsReady(true);
+          } else if (isMounted) {
+            setTimeout(checkReady, 1000);
+          }
+        })
+        .catch(() => {
+          if (isMounted) setTimeout(checkReady, 1000);
+        });
+    };
+    checkReady();
+
+    return () => { isMounted = false; };
+  }, [streamId, error]);
+
+  // Heartbeat for WebRTC
+  useEffect(() => {
+    if (!streamId || !useWebRTC) return;
+    const interval = setInterval(() => {
+      fetch(getApiUrl(`/api/stream/heartbeat/${streamId}`)).catch(() => {});
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [streamId, useWebRTC]);
+
+  useEffect(() => {
+    if (!streamId || useWebRTC) return; // Skip HLS if WebRTC is enabled
     const video = videoRef.current;
     if (!video) return;
 
-    const pathName = sanitizePathName(`cam_${source.id}_${source.name}`);
-    
-    // Proxy the MediaMTX stream through the backend to avoid firewall issues
-    const targetUrl = `http://127.0.0.1:8888/${pathName}/index.m3u8`;
-    const streamUrl = getApiUrl(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
-
-    let hls: Hls | null = null;
+    const streamUrl = getApiUrl(`/api/stream/hls/${streamId}/index.m3u8`);
 
     if (Hls.isSupported()) {
-      hls = new Hls({
+      const hls = new Hls({
         liveDurationInfinity: true,
-        maxLiveSyncPlaybackRate: 1.5,
       });
+      hlsRef.current = hls;
       hls.loadSource(streamUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
-          setError(`Stream error: ${data.details}`);
+          setError(`Camera offline or stream failed.`);
         }
       });
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -55,61 +155,128 @@ function CameraPlayer({ source }: { source: SourceRow }) {
     }
 
     return () => {
-      if (hls) {
-        hls.destroy();
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
       }
     };
-  }, [source]);
+  }, [streamId, useWebRTC]);
+
+  const webrtcUrl = streamId ? `http://${window.location.hostname}:8889/${streamId}/` : "";
+
+  const containerClasses = isExpanded 
+    ? "fixed inset-4 z-50 bg-black rounded-xl overflow-hidden shadow-2xl flex flex-col group"
+    : "bg-black rounded-xl overflow-hidden shadow-xl group relative cursor-pointer transition-colors aspect-video";
 
   return (
-    <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden shadow-2xl flex flex-col group">
-      <div className="relative aspect-video bg-black flex items-center justify-center">
-        {error ? (
-          <div className="flex flex-col items-center text-red-500 gap-2 p-4 text-center">
-            <AlertCircle className="w-8 h-8" />
-            <span className="text-sm">{error}</span>
+    <>
+      <div 
+        className={containerClasses}
+        onClick={!isExpanded ? toggleExpand : undefined}
+      >
+        <div className="relative w-full h-full flex items-center justify-center">
+          {!isReady && !error ? (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-neutral-500 bg-black">
+              <div className="w-8 h-8 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mb-2" />
+              <span className="text-sm">Connecting...</span>
+            </div>
+          ) : null}
+
+          {error ? (
+            <div 
+              className="flex flex-col items-center text-red-500 gap-2 p-4 text-center z-20 bg-black/90 w-full h-full justify-center absolute inset-0 cursor-pointer hover:bg-neutral-900 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                setError(null);
+                setIsReady(false);
+                setRetryCount(c => c + 1);
+              }}
+            >
+              <RefreshCw className="w-6 h-6 mb-1" />
+              <span className="text-sm font-medium">{error}</span>
+              <span className="text-xs text-neutral-400">Click to retry</span>
+            </div>
+          ) : useWebRTC && streamId && isReady ? (
+            <>
+              <iframe 
+                key={iframeKey}
+                src={webrtcUrl} 
+                className="w-full h-full border-0 absolute inset-0" 
+                allow="autoplay; fullscreen"
+                allowFullScreen 
+                scrolling="no"
+                title={`Camera ${source.name}`}
+              />
+              {/* Intercept clicks when not expanded so we can expand the iframe */}
+              {!isExpanded && (
+                <div className="absolute inset-0 z-10 cursor-pointer" onClick={toggleExpand} />
+              )}
+            </>
+          ) : streamId && isReady ? (
+            <video
+              ref={videoRef}
+              className="w-full h-full object-contain absolute inset-0 bg-black"
+              controls={isExpanded}
+              muted={!isExpanded}
+              playsInline
+            />
+          ) : null}
+          
+          {/* Subtle overlay label */}
+          <div className="absolute top-3 left-3 px-2 py-1 bg-black/40 backdrop-blur-sm rounded flex items-center gap-2 pointer-events-none z-20">
+            <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+            <span className="text-white/90 text-xs font-medium tracking-wide shadow-sm">{source.name}</span>
           </div>
-        ) : (
-          <video
-            ref={videoRef}
-            className="w-full h-full object-cover"
-            controls
-            muted
-            playsInline
-          />
-        )}
-      </div>
-      <div className="p-4 bg-neutral-900/80 backdrop-blur-md flex items-center gap-3 border-t border-neutral-800">
-        <div className="p-2 bg-blue-500/10 text-blue-400 rounded-lg">
-          <Video className="w-5 h-5" />
+
+          {/* Controls */}
+          <div className="absolute top-3 right-3 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all z-20">
+            <button 
+              onClick={toggleMode}
+              className="px-2 py-1 bg-black/60 hover:bg-black/80 backdrop-blur-sm rounded border border-white/10 text-white/90 text-xs font-medium cursor-pointer"
+            >
+              {useWebRTC ? "WebRTC" : "HLS"}
+            </button>
+            {isExpanded && (
+              <button 
+                onClick={toggleExpand}
+                className="w-6 h-6 flex items-center justify-center bg-black/60 hover:bg-black/80 backdrop-blur-sm rounded border border-white/10 text-white/90 cursor-pointer"
+              >
+                &times;
+              </button>
+            )}
+          </div>
         </div>
-        <div>
-          <h3 className="text-white font-medium">{source.name}</h3>
-          <p className="text-xs text-neutral-400">Live RTSP Stream</p>
-        </div>
       </div>
-    </div>
+      {isExpanded && (
+        <div 
+          className="fixed inset-0 bg-black/90 z-40 backdrop-blur-sm"
+          onClick={toggleExpand}
+        />
+      )}
+      {isExpanded && <div className="aspect-video hidden md:block" />}
+    </>
   );
 }
 
 export default function Cameras() {
   const { data: sources, loading, error } = useApi<SourceRow[]>("/api/sources");
-
   const cameras = sources?.filter(s => s.type === 'rtsp') || [];
 
   return (
     <div className="flex-1 flex flex-col bg-neutral-950 text-neutral-100 overflow-hidden pl-20 pt-6">
-      <div className="px-8 pb-6">
-        <h1 className="text-3xl font-bold flex items-center gap-3">
-          <Video className="w-8 h-8 text-blue-500" />
-          Security Cameras
-        </h1>
-        <p className="text-neutral-400 mt-2">Live feeds from your local RTSP cameras</p>
+      <div className="px-8 pb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center gap-3">
+            <Video className="w-8 h-8 text-blue-500" />
+            Security Cameras
+          </h1>
+          <p className="text-neutral-400 mt-2">Live feeds from your local RTSP cameras</p>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar p-8">
         {loading && <div className="text-neutral-500">Loading cameras...</div>}
-        {error && <div className="text-red-500">Failed to load cameras: {error.message}</div>}
+        {error && <div className="text-red-500">Failed to load cameras: {error}</div>}
         
         {!loading && !error && cameras.length === 0 && (
           <div className="max-w-xl bg-neutral-900/50 border border-neutral-800 rounded-2xl p-12 text-center">

@@ -228,8 +228,11 @@ func GetOptimalVideoArgs(quality string) []string {
 func softwareEncoder() []string {
 	return []string{
 		"-c:v", "libx264",
-		"-preset", "veryfast",
-		"-crf", "23",
+		"-preset", "ultrafast",
+		"-tune", "zerolatency",
+		"-profile:v", "baseline",
+		"-level", "3.0",
+		"-crf", "28",
 		"-vf", "bwdif",
 		"-g", "30",
 	}

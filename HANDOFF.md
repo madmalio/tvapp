@@ -78,8 +78,12 @@ scp .\bin\tvapp-linux mark@192.168.4.143:~/tvapp/tvapp
 
 ## Outstanding Tasks
 
-1. **Distracting "Red Pill" UI**: When switching channels, a red "Starting stream..." pill flashes on the screen which the user finds distracting. Needs to be removed or smoothed out.
-2. **Quality Selector Settings**: Ensure the UI quality selector correctly reflects and respects the bitrate/quality set by the automated speedtest.
+1. **RTSP Camera Bugs (HIGH PRIORITY)**: 
+   - A new dedicated `Cameras.tsx` dashboard was built to display RTSP security cameras via MediaMTX, decoupling them from the main TV channels. However, there are two major issues the next agent MUST fix:
+     - The RTSP streams are still failing to play in the `Cameras.tsx` grid. The frontend attempts to load them via `/api/proxy?url=http://127.0.0.1:8888/{cam_id}/index.m3u8` to bypass firewall ports, but MediaMTX or the `proxyStreamHandler` is failing to serve the stream correctly.
+     - The ghost RTSP cameras are STILL showing up in the `ChannelList.tsx` and `EpgGrid.tsx` pages. The backend has an aggressive SQLite cleanup script in `schema.go` `Init()`, but it doesn't seem to be working, or the frontend/backend is still incorrectly mapping the sources.
+2. **Distracting "Red Pill" UI**: When switching channels, a red "Starting stream..." pill flashes on the screen which the user finds distracting. Needs to be removed or smoothed out.
+3. **Quality Selector Settings**: Ensure the UI quality selector correctly reflects and respects the bitrate/quality set by the automated speedtest.
 
 ## Future Work
 

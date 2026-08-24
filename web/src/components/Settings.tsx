@@ -13,7 +13,7 @@ export default function Settings() {
   const { data: sources, refetch: refetchSources } = useApi<Source[]>('/api/sources');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
-  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+  const [draggedSourceId, setDraggedSourceId] = useState<string | null>(null);
   const [draggableId, setDraggableId] = useState<number | null>(null);
   
   // Modals
@@ -108,12 +108,17 @@ export default function Settings() {
     }
   }
 
-  const handleDrop = async (e: React.DragEvent, dropIdx: number) => {
+  const handleDrop = async (e: React.DragEvent, dropSourceId: string) => {
     e.preventDefault();
-    if (draggedIdx === null || draggedIdx === dropIdx || !sources) return;
+    if (!draggedSourceId || draggedSourceId === dropSourceId || !sources) return;
 
     const newSources = [...sources];
-    const [draggedItem] = newSources.splice(draggedIdx, 1);
+    const dragIdx = newSources.findIndex(s => s.id === draggedSourceId);
+    const dropIdx = newSources.findIndex(s => s.id === dropSourceId);
+    
+    if (dragIdx === -1 || dropIdx === -1) return;
+
+    const [draggedItem] = newSources.splice(dragIdx, 1);
     newSources.splice(dropIdx, 0, draggedItem);
     
     setLoading(true);
@@ -133,7 +138,7 @@ export default function Settings() {
       setMessage(`Error: ${err.message}`);
     } finally {
       setLoading(false);
-      setDraggedIdx(null);
+      setDraggedSourceId(null);
     }
   };
 
@@ -226,15 +231,15 @@ export default function Settings() {
                       key={src.id} 
                       draggable={draggableId === src.id}
                       onDragStart={(e) => {
-                        setDraggedIdx(idx);
+                        setDraggedSourceId(src.id!);
                         e.dataTransfer.effectAllowed = "move";
                       }}
                       onDragOver={(e) => {
                         e.preventDefault();
                         e.dataTransfer.dropEffect = "move";
                       }}
-                      onDrop={(e) => handleDrop(e, idx)}
-                      className={`bg-neutral-800/50 backdrop-blur-md rounded-xl p-3 md:p-5 border shadow-xl shadow-black/20 flex items-center justify-between group transition-colors ${draggedIdx === idx ? 'border-blue-500 opacity-50' : 'border-neutral-700/50 hover:border-blue-500/30'}`}
+                      onDrop={(e) => handleDrop(e, src.id!)}
+                      className={`bg-neutral-800/50 backdrop-blur-md rounded-xl p-3 md:p-5 border shadow-xl shadow-black/20 flex items-center justify-between group transition-colors ${draggedSourceId === src.id ? 'border-blue-500 opacity-50' : 'border-neutral-700/50 hover:border-blue-500/30'}`}
                     >
                       <div className="flex items-center gap-2 md:gap-4 pointer-events-none">
                         <div 
@@ -383,10 +388,27 @@ export default function Settings() {
                   {rtspSources.map((src) => (
                     <div 
                       key={src.id} 
-                      className="bg-neutral-800/50 backdrop-blur-md rounded-xl p-3 md:p-5 border border-neutral-700/50 hover:border-blue-500/30 shadow-xl shadow-black/20 flex items-center justify-between transition-colors"
+                      draggable={draggableId === src.id}
+                      onDragStart={(e) => {
+                        setDraggedSourceId(src.id!);
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                      }}
+                      onDrop={(e) => handleDrop(e, src.id!)}
+                      className={`bg-neutral-800/50 backdrop-blur-md rounded-xl p-3 md:p-5 border shadow-xl shadow-black/20 flex items-center justify-between group transition-colors ${draggedSourceId === src.id ? 'border-blue-500 opacity-50' : 'border-neutral-700/50 hover:border-blue-500/30'}`}
                     >
-                      <div className="flex items-center gap-4">
-                        <div className="p-3 rounded-lg bg-blue-500/10 text-blue-400">
+                      <div className="flex items-center gap-2 md:gap-4 pointer-events-none">
+                        <div 
+                          className="cursor-move p-1 md:p-2 text-neutral-600 hover:text-white transition-colors pointer-events-auto"
+                          onMouseEnter={() => setDraggableId(src.id)}
+                          onMouseLeave={() => setDraggableId(null)}
+                        >
+                          <GripVertical className="w-5 h-5" />
+                        </div>
+                        <div className="p-2 md:p-3 rounded-lg bg-blue-500/10 text-blue-400">
                           <Video className="w-6 h-6" />
                         </div>
                         <div>
@@ -524,6 +546,7 @@ export default function Settings() {
             <h2 className="text-xl font-semibold text-white mb-4">{formSource.id ? 'Edit Source' : 'Add Source'}</h2>
             
             <form onSubmit={saveSource} className="space-y-4">
+              {formSource.type !== 'rtsp' && (
               <div>
                 <label className="block text-sm text-neutral-400 mb-1.5">Source Type</label>
                 <select
@@ -534,9 +557,9 @@ export default function Settings() {
                 >
                   <option value="iptv">IPTV Playlist (M3U)</option>
                   <option value="hdhomerun">HDHomeRun Tuner</option>
-                  <option value="rtsp">RTSP Security Camera</option>
                 </select>
               </div>
+            )}
 
               <div>
                 <label className="block text-sm text-neutral-400 mb-1.5">{formSource.type === 'rtsp' ? 'Camera Name' : 'Display Name'}</label>
@@ -575,19 +598,6 @@ export default function Settings() {
                 </div>
               )}
 
-              {formSource.type === 'rtsp' && (
-                <div>
-                  <label className="block text-sm text-neutral-400 mb-1.5">Thumbnail URL (Optional)</label>
-                  <input
-                    type="url"
-                    value={formSource.epg_url || ''}
-                    onChange={e => setFormSource({...formSource, epg_url: e.target.value})}
-                    placeholder="https://..."
-                    className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              )}
-
               <div className="flex justify-end gap-3 mt-8">
                 <button
                   type="button"
@@ -601,7 +611,7 @@ export default function Settings() {
                   disabled={loading}
                   className="bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-700 disabled:text-neutral-500 text-white text-sm font-medium px-6 py-2 rounded-lg transition-all"
                 >
-                  {loading ? 'Saving...' : 'Save Source'}
+                  {loading ? "Saving..." : formSource.type === "rtsp" ? "Save Camera" : "Save Source"}
                 </button>
               </div>
             </form>
@@ -613,9 +623,11 @@ export default function Settings() {
       {showDeleteModal !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 max-w-md w-full shadow-2xl">
-            <h2 className="text-xl font-semibold text-white mb-2">Delete Source?</h2>
+            <h2 className="text-xl font-semibold text-white mb-2">{sources?.find(s => s.id === showDeleteModal)?.type === 'rtsp' ? 'Delete Camera?' : 'Delete Source?'}</h2>
             <p className="text-neutral-400 mb-6 text-sm">
-              Are you sure you want to delete this source? This will permanently remove all of its channels and EPG data from your database.
+              {sources?.find(s => s.id === showDeleteModal)?.type === 'rtsp' 
+                ? 'Are you sure you want to delete this camera? This action cannot be undone.' 
+                : 'Are you sure you want to delete this source? This will permanently remove all of its channels and EPG data from your database.'}
             </p>
             <div className="flex justify-end gap-3">
               <button

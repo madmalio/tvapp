@@ -86,7 +86,8 @@ tvapp/
 
 - **API routes** use chi router in `router.go`
 - **Multi-Source Architecture** uses `source_id` foreign keys for `channels` and `epg_entries`. The frontend organizes content by `activeSourceId` in horizontal tabs.
-- **Settings Dashboard** supports full CRUD operations for multiple M3U, XMLTV, and HDHomeRun sources.
+- **RTSP Cameras Dashboard**: RTSP cameras are managed as `sources` with `type="rtsp"`, but they are designed to be explicitly excluded from the `channels` table and TV guide. They have their own dedicated dashboard (`/cameras`). MediaMTX API is called in `sources.go` to dynamically create streams for them on port 8888.
+- **Settings Dashboard** supports full CRUD operations for multiple M3U, XMLTV, HDHomeRun, and RTSP sources.
 - **CORS** is handled per-route via `corsMiddleware`
 - **HLS proxying** happens through `/api/proxy` endpoint (playlist-only proxy + segment proxying)
 - **FFmpeg** is used for non-HLS streams via `/api/stream/start` (kept as fallback)

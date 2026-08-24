@@ -117,7 +117,8 @@ const ChannelCarousel = memo(function ChannelCarousel({ groupName, channels, onH
 });
 
 export default function ChannelList() {
-  const { data: sources } = useApi<Source[]>('/api/sources');
+  const { data: sourcesData } = useApi<Source[]>('/api/sources');
+  const sources = useMemo(() => sourcesData?.filter(s => s.type !== 'rtsp') || [], [sourcesData]);
   const [activeSourceId, setActiveSourceId] = useState<number | null>(null);
 
   const [channels, setChannels] = useState<Channel[]>([]);

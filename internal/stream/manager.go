@@ -86,7 +86,7 @@ func Start(rawURL string, tunerType string, quality string) (*Session, error) {
 	}
 
 	streamURL := rawURL
-	if tunerType != "hdhomerun" {
+	if tunerType != "hdhomerun" && tunerType != "rtsp" {
 		prefetchCookies(rawURL)
 		streamURL = resolveStreamURL(rawURL)
 	}
@@ -204,7 +204,7 @@ func (s *Session) runLoop() {
 		s.mu.Unlock()
 
 		streamURL := s.URL
-		if s.TunerType != "hdhomerun" {
+		if s.TunerType != "hdhomerun" && s.TunerType != "rtsp" {
 			// Re-resolve the token from the original M3U master playlist in case it expired
 			prefetchCookies(s.RawURL)
 			streamURL = resolveStreamURL(s.RawURL)
@@ -214,7 +214,9 @@ func (s *Session) runLoop() {
 		}
 
 		videoArgs := []string{"-c:v", "copy"}
-		if s.TunerType == "hdhomerun" {
+		if s.TunerType == "rtsp" {
+			videoArgs = []string{"-c:v", "copy", "-c:a", "pcm_mulaw", "-ar", "8000", "-ac", "1"}
+		} else if s.TunerType == "hdhomerun" {
 			videoArgs = GetOptimalVideoArgs(s.Quality)
 		}
 
@@ -227,14 +229,29 @@ func (s *Session) runLoop() {
 			analyzeSize = "5000000"
 		}
 
-		args := []string{
-			"-user_agent", userAgent,
-			"-headers", headers,
-			"-err_detect", "ignore_err",
-			"-analyzeduration", analyzeSize,
-			"-probesize", analyzeSize,
-			"-i", streamURL,
-			"-sn",
+		var args []string
+		if s.TunerType == "rtsp" {
+			args = append(args, 
+				"-rtsp_transport", "tcp",
+				"-fflags", "nobuffer",
+				"-flags", "low_delay",
+				"-err_detect", "ignore_err",
+				"-analyzeduration", "5000000",
+				"-probesize", "5000000",
+				"-use_wallclock_as_timestamps", "1",
+				"-i", streamURL,
+				"-sn",
+			)
+		} else {
+			args = append(args,
+				"-user_agent", userAgent,
+				"-headers", headers,
+				"-err_detect", "ignore_err",
+				"-analyzeduration", analyzeSize,
+				"-probesize", analyzeSize,
+				"-i", streamURL,
+				"-sn",
+			)
 		}
 		args = append(args, videoArgs...)
 		
@@ -244,6 +261,13 @@ func (s *Session) runLoop() {
 				"-b:a", "192k",
 				"-ac", "2",
 				"-max_muxing_queue_size", "1024",
+				"-f", "rtsp",
+				"-rtsp_transport", "tcp",
+				"-loglevel", "warning",
+				rtspURL,
+			)
+		} else if s.TunerType == "rtsp" {
+			args = append(args,
 				"-f", "rtsp",
 				"-rtsp_transport", "tcp",
 				"-loglevel", "warning",

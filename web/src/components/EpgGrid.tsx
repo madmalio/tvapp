@@ -46,7 +46,8 @@ function mapCategory(rawGroup: string, channelName: string = ""): string {
 }
 
 export default function EpgGrid() {
-  const { data: sources } = useApi<Source[]>('/api/sources');
+  const { data: sourcesData } = useApi<Source[]>('/api/sources');
+  const sources = useMemo(() => sourcesData?.filter(s => s.type !== 'rtsp') || [], [sourcesData]);
   const [activeSourceId, setActiveSourceId] = useState<number | null>(null);
 
   const [channels, setChannels] = useState<Channel[]>([]);

@@ -59,16 +59,7 @@ func deleteMediaMTXPath(name string) {
 }
 
 func RegisterAllRTSPCameras() {
-	sources, err := db.GetSources()
-	if err != nil {
-		return
-	}
-	for _, s := range sources {
-		if s.Type == "rtsp" {
-			pathName := sanitizePathName(fmt.Sprintf("cam_%d_%s", s.ID, s.Name))
-			registerMediaMTXPath(pathName, s.URL)
-		}
-	}
+	// Replaced by FFmpeg dynamic starting
 }
 
 func getSourcesHandler(w http.ResponseWriter, r *http.Request) {
@@ -375,9 +366,6 @@ func parseSource(s db.SourceRow) {
 		db.ClearEPGEntriesForSource(s.ID)
 		db.SaveEPGEntries(epgRows)
 		log.Printf("[source:%d] loaded %d hdhomerun epg entries", s.ID, len(epgRows))
-	} else if s.Type == "rtsp" {
-		pathName := sanitizePathName(fmt.Sprintf("cam_%d_%s", s.ID, s.Name))
-		registerMediaMTXPath(pathName, s.URL)
 	}
 }
 

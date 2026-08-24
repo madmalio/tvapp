@@ -13,25 +13,37 @@ export type StreamQuality =
 
 let globalSpeedTestRun = false;
 let globalSpeedMbps: number | null = null;
+let globalPreferredQuality: StreamQuality | null = null;
+let listeners: Array<() => void> = [];
 
 export function useSpeedTest() {
   const [preferredQuality, setPreferredQuality] = useState<StreamQuality>(() => {
-    return (localStorage.getItem('preferredQuality') as StreamQuality) || 'source';
+    return globalPreferredQuality || (localStorage.getItem('preferredQuality') as StreamQuality) || 'source';
   });
   const [speedMbps, setSpeedMbps] = useState<number | null>(globalSpeedMbps);
-  const [isTesting, setIsTesting] = useState(false);
+  const [isTesting, setIsTesting] = useState(!globalSpeedTestRun || (globalSpeedTestRun && globalSpeedMbps === null));
+
+  useEffect(() => {
+    const handler = () => {
+      if (globalPreferredQuality) setPreferredQuality(globalPreferredQuality);
+      if (globalSpeedMbps !== null) setSpeedMbps(globalSpeedMbps);
+      setIsTesting(false);
+    };
+    listeners.push(handler);
+    return () => {
+      listeners = listeners.filter(l => l !== handler);
+    };
+  }, []);
 
   useEffect(() => {
     if (globalSpeedTestRun) return;
+    globalSpeedTestRun = true;
+    setIsTesting(true);
     
     const testSpeed = async () => {
-      globalSpeedTestRun = true;
-      setIsTesting(true);
       try {
         const startTime = performance.now();
-        const response = await fetch(getApiUrl('/api/speedtest'), {
-          cache: 'no-store'
-        });
+        const response = await fetch(getApiUrl('/api/speedtest'), { cache: 'no-store' });
         
         if (!response.ok) throw new Error('Speedtest failed');
         
@@ -44,47 +56,47 @@ export function useSpeedTest() {
         const mbps = speedBps / (1024 * 1024);
         
         globalSpeedMbps = mbps;
-        setSpeedMbps(mbps);
         
-        // Auto-select quality with a 20% safety margin
-        // Required Mbps = target bitrate / 0.8
         let targetQuality: StreamQuality = '360p_low';
         if (mbps > 15) {
-          targetQuality = 'source'; // Source might be 12-15Mbps
-        } else if (mbps > 10) { // 8 / 0.8
+          targetQuality = 'source';
+        } else if (mbps > 10) {
           targetQuality = '1080p_high';
-        } else if (mbps > 6.25) { // 5 / 0.8
+        } else if (mbps > 6.25) {
           targetQuality = '1080p_std';
-        } else if (mbps > 5) { // 4 / 0.8
+        } else if (mbps > 5) {
           targetQuality = '720p_high';
-        } else if (mbps > 2.5) { // 2 / 0.8
+        } else if (mbps > 2.5) {
           targetQuality = '720p_std';
-        } else if (mbps > 1.875) { // 1.5 / 0.8
+        } else if (mbps > 1.875) {
           targetQuality = '480p_high';
-        } else if (mbps > 1.25) { // 1 / 0.8
+        } else if (mbps > 1.25) {
           targetQuality = '480p_std';
         } else {
           targetQuality = '360p_low';
         }
 
-        // Only overwrite if they didn't explicitly set it previously
-        // Actually, let's always auto-detect on startup to adapt to current network
-        setPreferredQuality(targetQuality);
-        localStorage.setItem('preferredQuality', targetQuality);
+        if (!localStorage.getItem('userQualitySet')) {
+            globalPreferredQuality = targetQuality;
+            localStorage.setItem('preferredQuality', targetQuality);
+        } else {
+            globalPreferredQuality = (localStorage.getItem('preferredQuality') as StreamQuality) || 'source';
+        }
 
       } catch (err) {
         console.error('Speedtest error:', err);
       } finally {
-        setIsTesting(false);
+        listeners.forEach(l => l());
       }
     };
-
     testSpeed();
   }, []);
 
   const manuallySetQuality = (quality: StreamQuality) => {
-    setPreferredQuality(quality);
+    globalPreferredQuality = quality;
     localStorage.setItem('preferredQuality', quality);
+    localStorage.setItem('userQualitySet', 'true');
+    listeners.forEach(l => l());
   };
 
   return { preferredQuality, manuallySetQuality, speedMbps, isTesting };

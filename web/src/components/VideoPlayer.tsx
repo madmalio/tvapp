@@ -442,7 +442,7 @@ export default function VideoPlayer() {
         </div>
       ) : status ? (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-          <p className="text-white font-medium bg-red-600/90 backdrop-blur-md px-6 py-2 rounded-full shadow-lg">
+          <p className={`text-white font-medium backdrop-blur-md px-6 py-2 rounded-full shadow-lg transition-all duration-300 ${status.toLowerCase().includes('error') || status.toLowerCase().includes('fail') ? 'bg-red-600/90' : 'bg-neutral-900/80 border border-neutral-700'}`}>
             {status}
           </p>
         </div>

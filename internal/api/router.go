@@ -46,6 +46,7 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 	r.Put("/api/settings", updateSettingsHandler)
 	r.Post("/api/stream/start", startStreamHandler)
 	r.Delete("/api/stream/stop/{id}", stopStreamHandler)
+	r.Get("/api/stream/heartbeat/{id}", heartbeatStreamHandler)
 	r.Get("/api/stream/hls/*", serveHLSHandler)
 
 	fileServer := http.FileServer(http.FS(distFS))
@@ -196,7 +197,7 @@ func startVariantKeepalive() {
 			target := key.(string)
 			entry := value.(*variantCacheEntry)
 
-			if time.Since(entry.lastAccessed) > 15*time.Minute {
+			if time.Since(entry.lastAccessed) > 2*time.Minute {
 				log.Printf("[keepalive] removing stale variant cache for %s", target)
 				variantCache.Delete(key)
 				return true
@@ -639,7 +640,7 @@ func startStreamHandler(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(map[string]string{
 		"id":           sess.ID,
-		"manifest_url": fmt.Sprintf("/api/stream/hls/%s/stream.m3u8", sess.ID),
+		"manifest_url": fmt.Sprintf("/api/stream/hls/%s/index.m3u8", sess.ID),
 	})
 }
 
@@ -651,6 +652,16 @@ func stopStreamHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	stream.Stop(id)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func heartbeatStreamHandler(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	sess := stream.GetSession(id)
+	if sess == nil {
+		http.Error(w, "stream not found", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func serveHLSHandler(w http.ResponseWriter, r *http.Request) {
@@ -668,14 +679,11 @@ func serveHLSHandler(w http.ResponseWriter, r *http.Request) {
 	filename := parts[1]
 
 	sess := stream.GetSession(id)
-	if sess == nil {
+	if sess == nil && !strings.HasPrefix(id, "cam") {
 		http.Error(w, "stream not found", http.StatusNotFound)
 		return
 	}
 	targetFilename := filename
-	if filename == "stream.m3u8" {
-		targetFilename = "index.m3u8"
-	}
 	targetURL := fmt.Sprintf("http://127.0.0.1:8888/%s/%s", id, targetFilename)
 	if r.URL.RawQuery != "" {
 		targetURL += "?" + r.URL.RawQuery
@@ -691,12 +699,20 @@ func serveHLSHandler(w http.ResponseWriter, r *http.Request) {
 		reqProxy.Header[k] = v
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	isManifest := filename == "index.m3u8" || filename == "stream.m3u8"
+	isCamera := sess != nil && sess.TunerType == "rtsp"
 	
+	var client *http.Client
+	if isCamera && isManifest {
+		client = &http.Client{Timeout: 500 * time.Millisecond}
+	} else {
+		client = &http.Client{Timeout: 60 * time.Second}
+	}
+
 	var resp *http.Response
-	if filename == "stream.m3u8" {
-		// Wait up to ~7.5 seconds for MediaMTX to begin publishing
-		for i := 0; i < 15; i++ {
+	if isManifest && !isCamera {
+		// Wait up to ~15 seconds for MediaMTX to begin publishing (especially for remote HDHomeRun tuners)
+		for i := 0; i < 30; i++ {
 			resp, err = client.Do(reqProxy)
 			if err == nil && resp.StatusCode == 200 {
 				break
