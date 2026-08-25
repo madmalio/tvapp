@@ -6,12 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"tvapp/cmd/server/webdist"
 	"tvapp/internal/api"
 	"tvapp/internal/db"
+	"tvapp/internal/stream"
 )
 
 func startMediaMTX() *exec.Cmd {
@@ -36,6 +38,13 @@ func startGo2RTC() *exec.Cmd {
 	yamlStr := "rtsp:\n  listen: \":8556\"\n"
 	yamlStr += "ffmpeg:\n"
 	yamlStr += "  bin: ffmpeg\n" // Ensure ffmpeg is used
+
+	camArgs := stream.GetOptimalVideoArgs("480p_std")
+	camStr := strings.Join(camArgs, " ")
+	camStr = strings.ReplaceAll(camStr, "bwdif,", "") // Remove deinterlacer
+	camStr += " -an" // Drop audio for grid view
+	yamlStr += "  cam_sd: \"" + camStr + "\"\n"
+
 	os.WriteFile("go2rtc.yaml", []byte(yamlStr), 0644)
 
 	bin := "go2rtc"

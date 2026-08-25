@@ -114,7 +114,7 @@ func Start(rawURL string, tunerType string, quality string) (*Session, error) {
 		if resp, err := http.DefaultClient.Do(req); err == nil {
 			resp.Body.Close()
 		}
-		sdSrc := fmt.Sprintf("ffmpeg:%s#video=h264#width=640", id)
+		sdSrc := fmt.Sprintf("ffmpeg:%s#video=cam_sd", id)
 		putSDURL := fmt.Sprintf("http://127.0.0.1:1984/api/streams?name=%s_sd&src=%s", id, url.QueryEscape(sdSrc))
 		reqSD, _ := http.NewRequest("PUT", putSDURL, nil)
 		if resp, err := http.DefaultClient.Do(reqSD); err == nil {

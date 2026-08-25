@@ -1,4 +1,3 @@
-import Hls from "hls.js";
 import { useEffect, useRef, useState } from "react";
 import { getApiUrl } from "../lib/api";
 import { useApi } from "../hooks/useApi";
@@ -9,19 +8,9 @@ type SourceRow = {
   name: string;
   type: string;
   url: string;
-  epg_url?: string;
 };
 
-function sanitizePathName(name: string) {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '');
-}
-
-import Hls from "hls.js";
-import { useEffect, useRef, useState } from "react";
-import { getApiUrl } from "../lib/api";
-
 function CameraPlayer({ source }: { source: SourceRow }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [streamId, setStreamId] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
@@ -29,28 +18,9 @@ function CameraPlayer({ source }: { source: SourceRow }) {
   const [isReady, setIsReady] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const sessionIdRef = useRef<string | null>(null);
-  const hlsRef = useRef<any>(null);
-
-  const [useWebRTC, setUseWebRTC] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(`tvapp_cam_${source.id}_webrtc`) === "true";
-    } catch (e) {
-      return false;
-    }
-  });
-
-  const toggleMode = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const newVal = !useWebRTC;
-    
-    setUseWebRTC(newVal);
-    try {
-      localStorage.setItem(`tvapp_cam_${source.id}_webrtc`, newVal.toString());
-    } catch(e) {}
-  };
 
   const toggleExpand = () => {
-    if (isExpanded && useWebRTC) {
+    if (isExpanded) {
       setIframeKey(k => k + 1);
     }
     setIsExpanded(!isExpanded);
@@ -68,7 +38,7 @@ function CameraPlayer({ source }: { source: SourceRow }) {
     .then(r => r.json())
     .then(data => {
       if (!active) {
-        fetch(getApiUrl(`/api/stream/stop/${data.id}`), { method: "DELETE" }).catch(() => {});
+        fetch(getApiUrl(/api/stream/stop/ + data.id), { method: "DELETE" }).catch(() => {});
         return;
       }
       sessionIdRef.current = data.id;
@@ -79,18 +49,17 @@ function CameraPlayer({ source }: { source: SourceRow }) {
     return () => {
       active = false;
       if (sessionIdRef.current) {
-        fetch(getApiUrl(`/api/stream/stop/${sessionIdRef.current}`), { method: "DELETE" }).catch(() => {});
+        fetch(getApiUrl(/api/stream/stop/ + sessionIdRef.current), { method: "DELETE" }).catch(() => {});
         sessionIdRef.current = null;
       }
     };
   }, [source, retryCount]);
 
-  // Wait until the stream is ACTUALLY published in MediaMTX before hiding the loader
   useEffect(() => {
     if (!streamId || error) return;
     
     let isMounted = true;
-        let attempts = 0;
+    let attempts = 0;
     const checkReady = () => {
       attempts++;
       if (attempts > 30) {
@@ -99,7 +68,7 @@ function CameraPlayer({ source }: { source: SourceRow }) {
         }
         return;
       }
-      fetch(getApiUrl(`/api/go2rtc/api/streams?src=${streamId}`), { method: 'GET' })
+      fetch(getApiUrl(/api/go2rtc/api/streams?src= + streamId), { method: 'GET' })
         .then(res => {
           if (res.ok && isMounted) {
             setIsReady(true);
@@ -116,55 +85,17 @@ function CameraPlayer({ source }: { source: SourceRow }) {
     return () => { isMounted = false; };
   }, [streamId, error]);
 
-  // Heartbeat for WebRTC
+  // Heartbeat to keep session alive
   useEffect(() => {
-    if (!streamId || !useWebRTC) return;
+    if (!streamId) return;
     const interval = setInterval(() => {
-      fetch(getApiUrl(`/api/stream/heartbeat/${streamId}`)).catch(() => {});
+      fetch(getApiUrl(/api/stream/heartbeat/ + streamId)).catch(() => {});
     }, 30000);
     return () => clearInterval(interval);
-  }, [streamId, useWebRTC]);
+  }, [streamId]);
 
-  const targetStreamId = isExpanded ? streamId : `${streamId}_sd`;
-
-  useEffect(() => {
-    if (!streamId || useWebRTC) return; // Skip HLS if WebRTC is enabled
-    const video = videoRef.current;
-    if (!video) return;
-
-    const streamUrl = getApiUrl(`/api/go2rtc/api/stream.m3u8?src=${targetStreamId}`);
-
-    if (Hls.isSupported()) {
-      const hls = new Hls({
-        liveDurationInfinity: true,
-      });
-      hlsRef.current = hls;
-      hls.loadSource(streamUrl);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) {
-          setError(`Camera offline or stream failed.`);
-        }
-      });
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(e => console.warn("Auto-play prevented", e));
-      });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = streamUrl;
-      video.addEventListener('loadedmetadata', () => {
-        video.play().catch(e => console.warn("Auto-play prevented", e));
-      });
-    }
-
-    return () => {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
-    };
-  }, [streamId, useWebRTC, isExpanded]);
-
-  const webrtcUrl = streamId ? getApiUrl(`/api/go2rtc/webrtc.html?src=${targetStreamId}`) : "";
+  const targetStreamId = isExpanded ? streamId : streamId + _sd;
+  const webrtcUrl = streamId ? getApiUrl(/api/go2rtc/webrtc.html?src= + targetStreamId) : "";
 
   const containerClasses = isExpanded 
     ? "fixed inset-4 z-50 bg-black rounded-xl overflow-hidden shadow-2xl flex flex-col group"
@@ -198,7 +129,7 @@ function CameraPlayer({ source }: { source: SourceRow }) {
               <span className="text-sm font-medium">{error}</span>
               <span className="text-xs text-neutral-400">Click to retry</span>
             </div>
-          ) : useWebRTC && streamId && isReady ? (
+          ) : streamId && isReady ? (
             <>
               <iframe 
                 key={iframeKey}
@@ -207,37 +138,23 @@ function CameraPlayer({ source }: { source: SourceRow }) {
                 allow="autoplay; fullscreen"
                 allowFullScreen 
                 scrolling="no"
-                title={`Camera ${source.name}`}
+                title={Camera  + source.name}
               />
-              {/* Intercept clicks when not expanded so we can expand the iframe */}
               {!isExpanded && (
                 <div className="absolute inset-0 z-10 cursor-pointer" onClick={toggleExpand} />
               )}
             </>
-          ) : streamId && isReady ? (
-            <video
-              ref={videoRef}
-              className="w-full h-full object-contain absolute inset-0 bg-black"
-              controls={isExpanded}
-              muted={!isExpanded}
-              playsInline
-            />
           ) : null}
           
-          {/* Subtle overlay label */}
           <div className="absolute top-3 left-3 px-2 py-1 bg-black/40 backdrop-blur-sm rounded flex items-center gap-2 pointer-events-none z-20">
             <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
             <span className="text-white/90 text-xs font-medium tracking-wide shadow-sm">{source.name}</span>
           </div>
 
-          {/* Controls */}
           <div className="absolute top-3 right-3 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all z-20">
-            <button 
-              onClick={toggleMode}
-              className="px-2 py-1 bg-black/60 hover:bg-black/80 backdrop-blur-sm rounded border border-white/10 text-white/90 text-xs font-medium cursor-pointer"
-            >
-              {useWebRTC ? "WebRTC" : "HLS"}
-            </button>
+            <span className="px-2 py-1 bg-black/60 backdrop-blur-sm rounded border border-white/10 text-blue-400 text-xs font-bold">
+              WebRTC
+            </span>
             {isExpanded && (
               <button 
                 onClick={toggleExpand}
