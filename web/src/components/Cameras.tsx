@@ -136,7 +136,7 @@ function CameraPlayer({ source }: { source: SourceRow }) {
                 allow="autoplay; fullscreen"
                 allowFullScreen 
                 scrolling="no"
-                title={Camera  + source.name}
+                title={"Camera " + source.name}
               />
               {!isExpanded && (
                 <div className="absolute inset-0 z-10 cursor-pointer" onClick={toggleExpand} />
