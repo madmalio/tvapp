@@ -109,7 +109,12 @@ func Start(rawURL string, tunerType string, quality string) (*Session, error) {
 	log.Printf("[stream] started %s", id)
 
 	if tunerType == "rtsp" {
-		putURL := fmt.Sprintf("http://127.0.0.1:1984/api/streams?name=%s&src=%s", id, url.QueryEscape(streamURL))
+		// Use UDP for the RTSP input to prevent TCP head-of-line blocking which causes stuttering/freezing.
+		// We also provide a secondary FFmpeg source strictly for transcoding audio to Opus, which ensures 
+		// the WebRTC player can instantly connect (instead of falling back to slow MSE) if the camera uses AAC!
+		src1 := streamURL + "#input=rtsp/udp"
+		src2 := "ffmpeg:" + streamURL + "#audio=opus"
+		putURL := fmt.Sprintf("http://127.0.0.1:1984/api/streams?name=%s&src=%s&src=%s", id, url.QueryEscape(src1), url.QueryEscape(src2))
 		req, _ := http.NewRequest("PUT", putURL, nil)
 		if resp, err := http.DefaultClient.Do(req); err == nil {
 			resp.Body.Close()
