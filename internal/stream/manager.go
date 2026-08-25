@@ -108,6 +108,22 @@ func Start(rawURL string, tunerType string, quality string) (*Session, error) {
 	sessions.Store(id, sess)
 	log.Printf("[stream] started %s", id)
 
+	if tunerType == "rtsp" {
+		putURL := fmt.Sprintf("http://127.0.0.1:1984/api/streams?name=%s&src=%s", id, url.QueryEscape(streamURL))
+		req, _ := http.NewRequest("PUT", putURL, nil)
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			resp.Body.Close()
+		}
+		sdSrc := fmt.Sprintf("ffmpeg:%s#video=h264#width=640", id)
+		putSDURL := fmt.Sprintf("http://127.0.0.1:1984/api/streams?name=%s_sd&src=%s", id, url.QueryEscape(sdSrc))
+		reqSD, _ := http.NewRequest("PUT", putSDURL, nil)
+		if resp, err := http.DefaultClient.Do(reqSD); err == nil {
+			resp.Body.Close()
+		}
+		close(sess.ready)
+		return sess, nil
+	}
+
 	go sess.runLoop()
 	go sess.waitForManifest()
 
@@ -377,6 +393,23 @@ func Stop(id string) {
 		return
 	}
 	s := v.(*Session)
+
+	if s.TunerType == "rtsp" {
+		delURL := fmt.Sprintf("http://127.0.0.1:1984/api/streams?src=%s", id)
+		req, _ := http.NewRequest("DELETE", delURL, nil)
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			resp.Body.Close()
+		}
+		delSDURL := fmt.Sprintf("http://127.0.0.1:1984/api/streams?src=%s_sd", id)
+		reqSD, _ := http.NewRequest("DELETE", delSDURL, nil)
+		if resp, err := http.DefaultClient.Do(reqSD); err == nil {
+			resp.Body.Close()
+		}
+		os.RemoveAll(s.Dir)
+		log.Printf("[stream] stopped %s (go2rtc)", id)
+		return
+	}
+
 	s.mu.Lock()
 	s.stopped = true
 	s.mu.Unlock()
