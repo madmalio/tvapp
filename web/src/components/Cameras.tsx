@@ -33,21 +33,21 @@ function CameraPlayer({ source }: { source: SourceRow }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url: source.url, tuner_type: "rtsp", quality: "720p_std" })
     })
-    .then(r => r.json())
-    .then(data => {
-      if (!active) {
-        fetch(getApiUrl(/api/stream/stop/ + data.id), { method: "DELETE" }).catch(() => {});
-        return;
-      }
-      sessionIdRef.current = data.id;
-      setStreamId(data.id);
-    })
-    .catch(err => setError(err.message));
+      .then(r => r.json())
+      .then(data => {
+        if (!active) {
+          fetch(getApiUrl("/api/stream/stop/" + data.id), { method: "DELETE" }).catch(() => {});
+          return;
+        }
+        sessionIdRef.current = data.id;
+        setStreamId(data.id);
+      })
+      .catch(err => setError(err.message));
 
     return () => {
       active = false;
       if (sessionIdRef.current) {
-        fetch(getApiUrl(/api/stream/stop/ + sessionIdRef.current), { method: "DELETE" }).catch(() => {});
+        fetch(getApiUrl("/api/stream/stop/" + sessionIdRef.current), { method: "DELETE" }).catch(() => {});
         sessionIdRef.current = null;
       }
     };
@@ -66,7 +66,7 @@ function CameraPlayer({ source }: { source: SourceRow }) {
         }
         return;
       }
-      fetch(getApiUrl(/api/go2rtc/api/streams?src= + streamId), { method: 'GET' })
+      fetch(getApiUrl("/api/go2rtc/api/streams?src=" + streamId), { method: 'GET' })
         .then(res => {
           if (res.ok && isMounted) {
             setIsReady(true);
@@ -87,13 +87,13 @@ function CameraPlayer({ source }: { source: SourceRow }) {
   useEffect(() => {
     if (!streamId) return;
     const interval = setInterval(() => {
-      fetch(getApiUrl(/api/stream/heartbeat/ + streamId)).catch(() => {});
+      fetch(getApiUrl("/api/stream/heartbeat/" + streamId)).catch(() => {});
     }, 30000);
     return () => clearInterval(interval);
   }, [streamId]);
 
-  const targetStreamId = isExpanded ? streamId : streamId + _sd;
-  const webrtcUrl = streamId ? getApiUrl(/api/go2rtc/webrtc.html?src= + targetStreamId) : "";
+  const targetStreamId = isExpanded ? streamId : streamId + "_sd";
+  const webrtcUrl = streamId ? getApiUrl("/api/go2rtc/webrtc.html?src=" + targetStreamId) : "";
 
   const containerClasses = isExpanded 
     ? "fixed inset-4 z-50 bg-black rounded-xl overflow-hidden shadow-2xl flex flex-col group"
