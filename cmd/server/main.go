@@ -30,7 +30,10 @@ func startGo2RTC() *exec.Cmd {
 	}
 
 	// Generate go2rtc config with custom ffmpeg templates
-	yamlStr := "ffmpeg:\n  aac_stereo: \"-c:a aac -ac 2 -b:a 128k\"\n"
+	yamlStr := "ffmpeg:\n"
+	yamlStr += "  aac_stereo: \"-c:a aac -ac 2 -b:a 128k\"\n"
+	yamlStr += "  hdhomerun_in: \"-fflags nobuffer -flags low_delay -err_detect ignore_err -analyzeduration 5000000 -probesize 5000000 -use_wallclock_as_timestamps 1 -i {input}\"\n"
+
 	qualities := []string{"source", "1080p_high", "1080p_std", "720p_high", "720p_std", "480p_high", "480p_std", "360p_low"}
 	for _, q := range qualities {
 		args := stream.GetOptimalVideoArgs(q)
