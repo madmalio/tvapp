@@ -33,6 +33,11 @@ func startMediaMTX() *exec.Cmd {
 }
 
 func startGo2RTC() *exec.Cmd {
+	yamlStr := "rtsp:\n  listen: \":8556\"\n"
+	yamlStr += "ffmpeg:\n"
+	yamlStr += "  bin: ffmpeg\n" // Ensure ffmpeg is used
+	os.WriteFile("go2rtc.yaml", []byte(yamlStr), 0644)
+
 	bin := "go2rtc"
 	if _, err := os.Stat("./go2rtc"); err == nil {
 		bin = "./go2rtc"
