@@ -26,6 +26,10 @@ func startGo2RTC() *exec.Cmd {
 		bin = "./go2rtc-linux"
 	}
 
+	// Generate go2rtc config with custom ffmpeg templates
+	configData := []byte("ffmpeg:\n  aac_stereo: \"-c:a aac -ac 2 -b:a 128k\"\n")
+	os.WriteFile("go2rtc.yaml", configData, 0644)
+
 	cmd := exec.Command(bin)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
