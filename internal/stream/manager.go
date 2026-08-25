@@ -99,7 +99,7 @@ func Start(rawURL string, tunerType string, quality string) (*Session, error) {
 		src = streamURL
 	} else if tunerType == "hdhomerun" {
 		// HDHomeRun produces MPEG-TS. Transcode to H264 for universal playback.
-		src = fmt.Sprintf("ffmpeg:%s#video=h264#audio=aac_stereo", streamURL)
+		src = fmt.Sprintf("ffmpeg:%s#video=hdhomerun_%s#audio=aac_stereo", streamURL, quality)
 	} else {
 		// PlutoTV / IPTV (usually H264/AAC inside HLS or MPEG-TS)
 		src = fmt.Sprintf("ffmpeg:%s#video=copy#audio=copy", streamURL)
