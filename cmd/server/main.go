@@ -1,55 +1,34 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"tvapp/cmd/server/webdist"
 	"tvapp/internal/api"
 	"tvapp/internal/db"
-	"tvapp/internal/stream"
 )
 
-func startGo2RTC() *exec.Cmd {
-	bin := "go2rtc"
-	if _, err := os.Stat("./go2rtc"); err == nil {
-		bin = "./go2rtc"
-	} else if _, err := os.Stat("./go2rtc.exe"); err == nil {
-		bin = "./go2rtc.exe"
-	} else if _, err := os.Stat("./go2rtc-win.exe"); err == nil {
-		bin = "./go2rtc-win.exe"
-	} else if _, err := os.Stat("./go2rtc-linux"); err == nil {
-		bin = "./go2rtc-linux"
+func startMediaMTX() *exec.Cmd {
+	bin := "mediamtx"
+	if _, err := os.Stat("./mediamtx"); err == nil {
+		bin = "./mediamtx"
+	} else if _, err := os.Stat("./mediamtx.exe"); err == nil {
+		bin = "./mediamtx.exe"
 	}
-
-	// Generate go2rtc config with custom ffmpeg templates
-	yamlStr := "ffmpeg:\n"
-	yamlStr += "  aac_stereo: \"-c:a aac -ac 2 -b:a 128k\"\n"
-	yamlStr += "  hdhomerun_in: \"-fflags nobuffer -flags low_delay -err_detect ignore_err -analyzeduration 5000000 -probesize 5000000 -use_wallclock_as_timestamps 1 -i {input}\"\n"
-
-	qualities := []string{"source", "1080p_high", "1080p_std", "720p_high", "720p_std", "480p_high", "480p_std", "360p_low"}
-	for _, q := range qualities {
-		args := stream.GetOptimalVideoArgs(q)
-		yamlStr += fmt.Sprintf("  hdhomerun_%s: \"%s\"\n", q, strings.Join(args, " "))
-	}
-	os.WriteFile("go2rtc.yaml", []byte(yamlStr), 0644)
 
 	cmd := exec.Command(bin)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
+	// Do not bind stdout/stderr to prevent IO blocking that causes stuttering
 	if err := cmd.Start(); err != nil {
-		log.Printf("Warning: failed to start go2rtc (%s): %v", bin, err)
+		log.Printf("Warning: failed to start mediamtx (%s): %v", bin, err)
 		return nil
 	}
-	log.Printf("Started go2rtc with PID %d", cmd.Process.Pid)
+	log.Printf("Started mediamtx with PID %d", cmd.Process.Pid)
 	return cmd
 }
 
@@ -68,9 +47,9 @@ func main() {
 
 	srv := &http.Server{Addr: ":" + port, Handler: router}
 
-	mtxCmd := startGo2RTC()
-
-	// Wait a moment for go2rtc to spin up its API listener
+	mtxCmd := startMediaMTX()
+	
+	// Wait a moment for MediaMTX to spin up its API listener
 	time.Sleep(1 * time.Second)
 	api.RegisterAllRTSPCameras()
 
@@ -82,7 +61,7 @@ func main() {
 		<-quit
 		log.Println("shutting down...")
 		if mtxCmd != nil && mtxCmd.Process != nil {
-			log.Println("stopping go2rtc...")
+			log.Println("stopping mediamtx...")
 			mtxCmd.Process.Signal(syscall.SIGTERM)
 		}
 		srv.Close()
