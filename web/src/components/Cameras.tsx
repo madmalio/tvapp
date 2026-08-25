@@ -20,9 +20,7 @@ function CameraPlayer({ source }: { source: SourceRow }) {
   const sessionIdRef = useRef<string | null>(null);
 
   const toggleExpand = () => {
-    if (isExpanded) {
-      setIframeKey(k => k + 1);
-    }
+    setIframeKey(k => k + 1);
     setIsExpanded(!isExpanded);
   };
 
