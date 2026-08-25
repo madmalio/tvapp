@@ -99,7 +99,7 @@ function CameraPlayer({ source }: { source: SourceRow }) {
         }
         return;
       }
-      fetch(getApiUrl(`/api/stream/hls/${streamId}/index.m3u8`), { method: 'GET' })
+      fetch(getApiUrl(`/api/go2rtc/api/streams?src=${streamId}`), { method: 'GET' })
         .then(res => {
           if (res.ok && isMounted) {
             setIsReady(true);
@@ -125,12 +125,14 @@ function CameraPlayer({ source }: { source: SourceRow }) {
     return () => clearInterval(interval);
   }, [streamId, useWebRTC]);
 
+  const targetStreamId = isExpanded ? streamId : `${streamId}_sd`;
+
   useEffect(() => {
     if (!streamId || useWebRTC) return; // Skip HLS if WebRTC is enabled
     const video = videoRef.current;
     if (!video) return;
 
-    const streamUrl = getApiUrl(`/api/stream/hls/${streamId}/index.m3u8`);
+    const streamUrl = getApiUrl(`/api/go2rtc/api/stream.m3u8?src=${targetStreamId}`);
 
     if (Hls.isSupported()) {
       const hls = new Hls({
@@ -160,9 +162,9 @@ function CameraPlayer({ source }: { source: SourceRow }) {
         hlsRef.current = null;
       }
     };
-  }, [streamId, useWebRTC]);
+  }, [streamId, useWebRTC, isExpanded]);
 
-  const webrtcUrl = streamId ? `http://${window.location.hostname}:8889/${streamId}/` : "";
+  const webrtcUrl = streamId ? getApiUrl(`/api/go2rtc/webrtc.html?src=${targetStreamId}`) : "";
 
   const containerClasses = isExpanded 
     ? "fixed inset-4 z-50 bg-black rounded-xl overflow-hidden shadow-2xl flex flex-col group"

@@ -8,9 +8,6 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,15 +18,11 @@ type Session struct {
 	ID        string
 	TunerType string
 	Quality   string
-	Dir       string
 	RawURL    string
 	URL       string
 	CreatedAt time.Time
 	LastUsed  time.Time
 	mu        sync.Mutex
-	ready     chan struct{}
-	stopCh    chan struct{}
-	stopped   bool
 }
 
 var (
@@ -80,10 +73,6 @@ func ffmpegHeaders(rawURL string) string {
 
 func Start(rawURL string, tunerType string, quality string) (*Session, error) {
 	id := fmt.Sprintf("stream_%d", time.Now().UnixNano())
-	dir := filepath.Join(os.TempDir(), "tvapp", id)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("mkdir: %w", err)
-	}
 
 	streamURL := rawURL
 	if tunerType != "hdhomerun" && tunerType != "rtsp" {
@@ -94,23 +83,50 @@ func Start(rawURL string, tunerType string, quality string) (*Session, error) {
 
 	sess := &Session{
 		ID:        id,
-		Dir:       dir,
 		RawURL:    rawURL,
 		URL:       streamURL,
 		TunerType: tunerType,
 		Quality:   quality,
 		CreatedAt: time.Now(),
 		LastUsed:  time.Now(),
-		ready:     make(chan struct{}),
-		stopCh:    make(chan struct{}),
 	}
 
 	sessions.Store(id, sess)
-	log.Printf("[stream] started %s", id)
 
-	go sess.runLoop()
-	go sess.waitForManifest()
+	// Build go2rtc src string
+	var src string
+	if tunerType == "rtsp" {
+		src = streamURL
+	} else if tunerType == "hdhomerun" {
+		// HDHomeRun produces MPEG-TS. Transcode to H264 for universal playback.
+		src = fmt.Sprintf("ffmpeg:%s#video=h264#audio=aac", streamURL)
+	} else {
+		// PlutoTV / IPTV (usually H264/AAC inside HLS or MPEG-TS)
+		src = fmt.Sprintf("ffmpeg:%s#video=copy#audio=aac", streamURL)
+	}
 
+	// Register main stream
+	putURL := fmt.Sprintf("http://127.0.0.1:1984/api/streams?name=%s&src=%s", id, url.QueryEscape(src))
+	req, _ := http.NewRequest("PUT", putURL, nil)
+	if resp, err := http.DefaultClient.Do(req); err == nil {
+		resp.Body.Close()
+	} else {
+		log.Printf("[stream] failed to register stream %s with go2rtc: %v", id, err)
+	}
+
+	// For cameras, register _sd companion stream
+	if tunerType == "rtsp" {
+		sdSrc := fmt.Sprintf("ffmpeg:%s#video=h264#width=640", id)
+		putSDURL := fmt.Sprintf("http://127.0.0.1:1984/api/streams?name=%s_sd&src=%s", id, url.QueryEscape(sdSrc))
+		reqSD, _ := http.NewRequest("PUT", putSDURL, nil)
+		if resp, err := http.DefaultClient.Do(reqSD); err == nil {
+			resp.Body.Close()
+		} else {
+			log.Printf("[stream] failed to register SD stream %s with go2rtc: %v", id, err)
+		}
+	}
+
+	log.Printf("[stream] started %s (go2rtc)", id)
 	return sess, nil
 }
 
@@ -194,171 +210,6 @@ func resolveHLSURL(base *url.URL, raw string) string {
 	return base.ResolveReference(parsed).String()
 }
 
-func (s *Session) runLoop() {
-	for {
-		s.mu.Lock()
-		if s.stopped {
-			s.mu.Unlock()
-			return
-		}
-		s.mu.Unlock()
-
-		streamURL := s.URL
-		if s.TunerType != "hdhomerun" && s.TunerType != "rtsp" {
-			// Re-resolve the token from the original M3U master playlist in case it expired
-			prefetchCookies(s.RawURL)
-			streamURL = resolveStreamURL(s.RawURL)
-			s.mu.Lock()
-			s.URL = streamURL
-			s.mu.Unlock()
-		}
-
-		videoArgs := []string{"-c:v", "copy"}
-		if s.TunerType == "rtsp" {
-			videoArgs = []string{"-c:v", "copy", "-c:a", "pcm_mulaw", "-ar", "8000", "-ac", "1"}
-		} else if s.TunerType == "hdhomerun" {
-			videoArgs = GetOptimalVideoArgs(s.Quality)
-		}
-
-		rtspURL := fmt.Sprintf("rtsp://localhost:8554/%s", s.ID)
-
-		headers := ffmpegHeaders(streamURL)
-
-		analyzeSize := "1000000"
-		if s.Quality == "music" {
-			analyzeSize = "5000000"
-		}
-
-		var args []string
-		if s.TunerType == "rtsp" {
-			args = append(args, 
-				"-rtsp_transport", "tcp",
-				"-fflags", "nobuffer",
-				"-flags", "low_delay",
-				"-err_detect", "ignore_err",
-				"-analyzeduration", "5000000",
-				"-probesize", "5000000",
-				"-use_wallclock_as_timestamps", "1",
-				"-i", streamURL,
-				"-sn",
-			)
-		} else {
-			args = append(args,
-				"-user_agent", userAgent,
-				"-headers", headers,
-				"-err_detect", "ignore_err",
-				"-analyzeduration", analyzeSize,
-				"-probesize", analyzeSize,
-				"-i", streamURL,
-				"-sn",
-			)
-		}
-		args = append(args, videoArgs...)
-		
-		if s.Quality == "music" {
-			args = append(args,
-				"-c:a", "aac",
-				"-b:a", "192k",
-				"-ac", "2",
-				"-max_muxing_queue_size", "1024",
-				"-f", "rtsp",
-				"-rtsp_transport", "tcp",
-				"-loglevel", "warning",
-				rtspURL,
-			)
-		} else if s.TunerType == "rtsp" {
-			args = append(args,
-				"-f", "rtsp",
-				"-rtsp_transport", "tcp",
-				"-loglevel", "warning",
-				rtspURL,
-			)
-		} else {
-			args = append(args,
-				"-c:a", "aac",
-				"-b:a", "128k",
-				"-ac", "2",
-				"-f", "rtsp",
-				"-rtsp_transport", "tcp",
-				"-pkt_size", "1200",
-				"-loglevel", "warning",
-				rtspURL,
-			)
-		}
-
-		cmd := exec.Command("ffmpeg", args...)
-		cmd.Dir = s.Dir
-		stderr, err := os.Create(filepath.Join(s.Dir, "ffmpeg.log"))
-		if err != nil {
-			log.Printf("[stream] %s log error: %v", s.ID, err)
-			time.Sleep(2 * time.Second)
-			continue
-		}
-		cmd.Stderr = stderr
-
-		if err := cmd.Start(); err != nil {
-			stderr.Close()
-			log.Printf("[stream] %s ffmpeg start error: %v", s.ID, err)
-			time.Sleep(2 * time.Second)
-			continue
-		}
-
-		log.Printf("[stream] %s ffmpeg started (pid=%d)", s.ID, cmd.Process.Pid)
-		log.Printf("[stream] %s ffmpeg headers: %s", s.ID, headers)
-
-		done := make(chan error, 1)
-		go func() {
-			done <- cmd.Wait()
-		}()
-
-		select {
-		case err := <-done:
-			stderr.Close()
-			log.Printf("[stream] %s ffmpeg exited: %v", s.ID, err)
-			
-			// If it crashed, dump the log to help with debugging
-			logData, _ := os.ReadFile(filepath.Join(s.Dir, "ffmpeg.log"))
-			if len(logData) > 0 {
-				log.Printf("[stream] %s ffmpeg log: %s", s.ID, string(logData))
-			}
-			
-		case <-s.stopCh:
-			if cmd.Process != nil {
-				cmd.Process.Kill()
-			}
-			stderr.Close()
-			<-done
-			log.Printf("[stream] %s ffmpeg killed", s.ID)
-			return
-		}
-
-		time.Sleep(1 * time.Second)
-	}
-}
-
-func (s *Session) waitForManifest() {
-	manifest := filepath.Join(s.Dir, "stream.m3u8")
-	deadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(manifest); err == nil {
-			close(s.ready)
-			log.Printf("[stream] %s manifest ready", s.ID)
-			return
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	log.Printf("[stream] %s manifest timeout", s.ID)
-}
-
-func (s *Session) WaitReady(timeout time.Duration) bool {
-	select {
-	case <-s.ready:
-		return true
-	case <-time.After(timeout):
-		return false
-	}
-}
-
 func GetSession(id string) *Session {
 	v, ok := sessions.Load(id)
 	if !ok {
@@ -377,11 +228,22 @@ func Stop(id string) {
 		return
 	}
 	s := v.(*Session)
-	s.mu.Lock()
-	s.stopped = true
-	s.mu.Unlock()
-	close(s.stopCh)
-	os.RemoveAll(s.Dir)
+
+	// Delete from go2rtc
+	delURL := fmt.Sprintf("http://127.0.0.1:1984/api/streams?src=%s", id)
+	req, _ := http.NewRequest("DELETE", delURL, nil)
+	if resp, err := http.DefaultClient.Do(req); err == nil {
+		resp.Body.Close()
+	}
+
+	if s.TunerType == "rtsp" {
+		delSDURL := fmt.Sprintf("http://127.0.0.1:1984/api/streams?src=%s_sd", id)
+		reqSD, _ := http.NewRequest("DELETE", delSDURL, nil)
+		if resp, err := http.DefaultClient.Do(reqSD); err == nil {
+			resp.Body.Close()
+		}
+	}
+
 	log.Printf("[stream] stopped %s", id)
 }
 

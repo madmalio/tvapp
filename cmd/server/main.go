@@ -14,21 +14,27 @@ import (
 	"tvapp/internal/db"
 )
 
-func startMediaMTX() *exec.Cmd {
-	bin := "mediamtx"
-	if _, err := os.Stat("./mediamtx"); err == nil {
-		bin = "./mediamtx"
-	} else if _, err := os.Stat("./mediamtx.exe"); err == nil {
-		bin = "./mediamtx.exe"
+func startGo2RTC() *exec.Cmd {
+	bin := "go2rtc"
+	if _, err := os.Stat("./go2rtc"); err == nil {
+		bin = "./go2rtc"
+	} else if _, err := os.Stat("./go2rtc.exe"); err == nil {
+		bin = "./go2rtc.exe"
+	} else if _, err := os.Stat("./go2rtc-win.exe"); err == nil {
+		bin = "./go2rtc-win.exe"
+	} else if _, err := os.Stat("./go2rtc-linux"); err == nil {
+		bin = "./go2rtc-linux"
 	}
 
 	cmd := exec.Command(bin)
-	// Do not bind stdout/stderr to prevent IO blocking that causes stuttering
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	
 	if err := cmd.Start(); err != nil {
-		log.Printf("Warning: failed to start mediamtx (%s): %v", bin, err)
+		log.Printf("Warning: failed to start go2rtc (%s): %v", bin, err)
 		return nil
 	}
-	log.Printf("Started mediamtx with PID %d", cmd.Process.Pid)
+	log.Printf("Started go2rtc with PID %d", cmd.Process.Pid)
 	return cmd
 }
 
@@ -47,9 +53,9 @@ func main() {
 
 	srv := &http.Server{Addr: ":" + port, Handler: router}
 
-	mtxCmd := startMediaMTX()
+	mtxCmd := startGo2RTC()
 	
-	// Wait a moment for MediaMTX to spin up its API listener
+	// Wait a moment for go2rtc to spin up its API listener
 	time.Sleep(1 * time.Second)
 	api.RegisterAllRTSPCameras()
 
@@ -61,7 +67,7 @@ func main() {
 		<-quit
 		log.Println("shutting down...")
 		if mtxCmd != nil && mtxCmd.Process != nil {
-			log.Println("stopping mediamtx...")
+			log.Println("stopping go2rtc...")
 			mtxCmd.Process.Signal(syscall.SIGTERM)
 		}
 		srv.Close()

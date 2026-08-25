@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httputil"
 	"net/url"
 	"strconv"
 	"strings"
@@ -47,7 +48,9 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 	r.Post("/api/stream/start", startStreamHandler)
 	r.Delete("/api/stream/stop/{id}", stopStreamHandler)
 	r.Get("/api/stream/heartbeat/{id}", heartbeatStreamHandler)
-	r.Get("/api/stream/hls/*", serveHLSHandler)
+	
+	go2rtcProxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: "127.0.0.1:1984"})
+	r.Mount("/api/go2rtc", http.StripPrefix("/api/go2rtc", go2rtcProxy))
 
 	fileServer := http.FileServer(http.FS(distFS))
 	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
@@ -640,7 +643,7 @@ func startStreamHandler(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(map[string]string{
 		"id":           sess.ID,
-		"manifest_url": fmt.Sprintf("/api/stream/hls/%s/index.m3u8", sess.ID),
+		"manifest_url": fmt.Sprintf("/api/go2rtc/api/stream.m3u8?src=%s", sess.ID),
 	})
 }
 
@@ -664,80 +667,6 @@ func heartbeatStreamHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func serveHLSHandler(w http.ResponseWriter, r *http.Request) {
-	rel := strings.TrimPrefix(r.URL.Path, "/api/stream/hls/")
-	if rel == "" {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	parts := strings.SplitN(rel, "/", 2)
-	if len(parts) < 2 {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	id := parts[0]
-	filename := parts[1]
-
-	sess := stream.GetSession(id)
-	if sess == nil && !strings.HasPrefix(id, "cam") {
-		http.Error(w, "stream not found", http.StatusNotFound)
-		return
-	}
-	targetFilename := filename
-	targetURL := fmt.Sprintf("http://127.0.0.1:8888/%s/%s", id, targetFilename)
-	if r.URL.RawQuery != "" {
-		targetURL += "?" + r.URL.RawQuery
-	}
-	
-	reqProxy, err := http.NewRequest("GET", targetURL, nil)
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	
-	for k, v := range r.Header {
-		reqProxy.Header[k] = v
-	}
-
-	isManifest := filename == "index.m3u8" || filename == "stream.m3u8"
-	isCamera := sess != nil && sess.TunerType == "rtsp"
-	
-	var client *http.Client
-	if isCamera && isManifest {
-		client = &http.Client{Timeout: 500 * time.Millisecond}
-	} else {
-		client = &http.Client{Timeout: 60 * time.Second}
-	}
-
-	var resp *http.Response
-	if isManifest && !isCamera {
-		// Wait up to ~15 seconds for MediaMTX to begin publishing (especially for remote HDHomeRun tuners)
-		for i := 0; i < 30; i++ {
-			resp, err = client.Do(reqProxy)
-			if err == nil && resp.StatusCode == 200 {
-				break
-			}
-			if resp != nil {
-				resp.Body.Close()
-			}
-			time.Sleep(500 * time.Millisecond)
-		}
-	} else {
-		resp, err = client.Do(reqProxy)
-	}
-
-	if err != nil || resp == nil || resp.StatusCode != 200 {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	defer resp.Body.Close()
-
-	for k, v := range resp.Header {
-		w.Header()[k] = v
-	}
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
-}
 
 func getSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	settings, err := db.GetAllSettings()
