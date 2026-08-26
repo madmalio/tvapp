@@ -86,7 +86,8 @@ tvapp/
 
 - **API routes** use chi router in `router.go`
 - **Multi-Source Architecture** uses `source_id` foreign keys for `channels` and `epg_entries`. The frontend organizes content by `activeSourceId` in horizontal tabs.
-- **RTSP Cameras Dashboard**: RTSP cameras are managed as `sources` with `type="rtsp"`, but they are designed to be explicitly excluded from the `channels` table and TV guide. They have their own dedicated dashboard (`/cameras`). MediaMTX API is called in `sources.go` to dynamically create streams for them on port 8888.
+- **RTSP Cameras Dashboard**: RTSP cameras are managed as `sources` with `type="rtsp"`, but they are designed to be explicitly excluded from the `channels` table and TV guide. They have their own dedicated dashboard (`/cameras`).
+- **WebRTC Warning**: We strongly attempted to migrate the RTSP Cameras dashboard to WebRTC (using both `go2rtc` and MediaMTX's native WebRTC engines) to eliminate the 5-10 second HLS latency. However, Wyze Bridge streams proved too unstable for these engines (TCP head-of-line blocking caused freezes, UDP dropped packets causing 15-second PLI keyframe stalls, and Wyze AAC audio threw codec errors in browsers). We have explicitly reverted to MediaMTX HLS via FFmpeg. Future agents: DO NOT attempt to switch the cameras to WebRTC without explicit user permission, as it is a known dead-end for this specific camera hardware.
 - **Settings Dashboard** supports full CRUD operations for multiple M3U, XMLTV, HDHomeRun, and RTSP sources.
 - **CORS** is handled per-route via `corsMiddleware`
 - **HLS proxying** happens through `/api/proxy` endpoint (playlist-only proxy + segment proxying)

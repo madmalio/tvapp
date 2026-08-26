@@ -76,6 +76,10 @@ scp .\bin\tvapp-linux mark@192.168.4.143:~/tvapp/tvapp
 | `web/src/components/ChannelList.tsx` | UI Guide, Hero Poster, Cached EPG, Memoized Carousel |
 | `web/src/components/VideoPlayer.tsx` | hls.js player with auto-recovery |
 
+## Known Constraints & Dead Ends
+
+**DO NOT ATTEMPT TO MIGRATE CAMERAS TO WEBRTC**: We spent significant time attempting to migrate the RTSP cameras (Wyze Bridge) to WebRTC (using both `go2rtc` and MediaMTX) to reduce HLS latency. This was a complete dead-end. The Wyze Bridge streams drop packets or stall unpredictably. Over UDP, this results in 15-second freezes because FFmpeg cannot forward RTCP PLI (Picture Loss Indication) keyframe requests. Over TCP, it causes head-of-line blocking that freezes the entire MediaMTX publisher. Additionally, the cameras use AAC audio which WebRTC browsers natively reject ("Codecs not supported"). We have permanently reverted to MediaMTX HLS for all streams. Do not attempt this migration again without explicit user instruction.
+
 ## Outstanding Tasks
 
 1. **RTSP Camera Bugs (HIGH PRIORITY)**: 
