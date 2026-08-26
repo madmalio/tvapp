@@ -4,6 +4,7 @@ import { ArrowLeft, Menu, X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, 
 import Hls from "hls.js";
 import { getApiUrl, fetchWithCache } from "../lib/api";
 import { useSpeedTest, StreamQuality } from "../hooks/useSpeedTest";
+import { lockToLandscape, unlockScreenOrientation } from "../lib/orientation";
 
 type ChannelInfo = {
   id: number;
@@ -304,13 +305,21 @@ export default function VideoPlayer() {
     localStorage.setItem('tvapp_muted', isMuted.toString());
   }, [volume, isMuted]);
 
+  // Automatic landscape orientation on mount & restore on unmount
+  useEffect(() => {
+    lockToLandscape(containerRef.current, videoRef.current);
+    return () => {
+      unlockScreenOrientation();
+    };
+  }, []);
+
   const togglePlay = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
+    lockToLandscape(containerRef.current, videoRef.current);
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
-      video.play();
-      setIsPlaying(true);
+      video.play().then(() => setIsPlaying(true)).catch(console.error);
     } else {
       video.pause();
       setIsPlaying(false);
@@ -323,17 +332,20 @@ export default function VideoPlayer() {
     if (!container) return;
 
     if (!document.fullscreenElement) {
-      container.requestFullscreen().catch(err => {
-        console.error("Error attempting to enable fullscreen:", err);
-      });
+      lockToLandscape(container, videoRef.current);
     } else {
-      document.exitFullscreen();
+      document.exitFullscreen().catch(console.error);
+      unlockScreenOrientation();
     }
   }, []);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const isFull = !!document.fullscreenElement;
+      setIsFullscreen(isFull);
+      if (isFull) {
+        lockToLandscape(containerRef.current, videoRef.current);
+      }
     };
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
@@ -414,7 +426,7 @@ export default function VideoPlayer() {
       ref={containerRef}
       className="flex-1 flex flex-col bg-black relative overflow-hidden cursor-default group"
       onMouseMove={handleMouseMove}
-      onClick={togglePlay}
+      onClick={handleMouseMove}
     >
       <video
         ref={videoRef}
@@ -454,25 +466,25 @@ export default function VideoPlayer() {
           showOverlay ? "opacity-100" : "opacity-0"
         }`}
       >
-        <div className="h-48 bg-gradient-to-b from-black/90 via-black/40 to-transparent flex items-start p-6 md:p-8">
+        <div className="h-36 sm:h-48 bg-gradient-to-b from-black/90 via-black/40 to-transparent flex items-start p-4 sm:p-6 md:p-8">
           {channel && (
-            <div className="pointer-events-auto flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+            <div className="pointer-events-auto flex items-center gap-2 sm:gap-4" onClick={(e) => e.stopPropagation()}>
               <button 
                 onClick={(e) => { e.stopPropagation(); navigate(backUrl); }}
-                className="p-3 bg-neutral-900/50 hover:bg-neutral-800 text-white rounded-full backdrop-blur-sm transition-colors flex items-center justify-center mr-2 shadow-lg cursor-pointer"
+                className="p-2 sm:p-3 bg-neutral-900/50 hover:bg-neutral-800 text-white rounded-full backdrop-blur-sm transition-colors flex items-center justify-center mr-1 sm:mr-2 shadow-lg cursor-pointer"
                 title="Exit Player"
               >
-                <ArrowLeft className="w-6 h-6" />
+                <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6" />
               </button>
               {channel.logo_url && (
                 <img 
                   src={channel.logo_url} 
                   alt={channel.name}
-                  className="h-12 md:h-14 object-contain drop-shadow-xl"
+                  className="h-8 sm:h-12 md:h-14 object-contain drop-shadow-xl"
                 />
               )}
               <div>
-                <h2 className="text-2xl md:text-4xl font-bold text-white tracking-tight drop-shadow-lg">
+                <h2 className="text-xl sm:text-2xl md:text-4xl font-bold text-white tracking-tight drop-shadow-lg">
                   {programTitle || channel.name}
                 </h2>
               </div>
@@ -481,33 +493,33 @@ export default function VideoPlayer() {
         </div>
 
         {/* Custom Bottom Controls */}
-        <div className="h-48 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex items-end p-6 md:p-8">
+        <div className="h-36 sm:h-48 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex items-end p-4 sm:p-6 md:p-8">
           <div className="w-full flex items-center justify-between pointer-events-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-4 md:gap-6">
+            <div className="flex items-center gap-3 sm:gap-4 md:gap-6">
               <button 
                 onClick={togglePlay} 
-                className="text-white hover:text-blue-400 transition-colors focus:outline-none"
+                className="text-white hover:text-blue-400 transition-colors focus:outline-none cursor-pointer"
               >
-                {isPlaying ? <Pause className="w-8 h-8 md:w-10 md:h-10 fill-current" /> : <Play className="w-8 h-8 md:w-10 md:h-10 fill-current" />}
+                {isPlaying ? <Pause className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 fill-current" /> : <Play className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 fill-current" />}
               </button>
               
               <button 
                 onClick={jumpToLive}
-                className={`flex items-center gap-2 transition-colors focus:outline-none ${isAtLiveEdge ? 'text-white/90' : 'text-neutral-500 hover:text-white cursor-pointer'}`}
+                className={`flex items-center gap-1.5 sm:gap-2 transition-colors focus:outline-none cursor-pointer ${isAtLiveEdge ? 'text-white/90' : 'text-neutral-500 hover:text-white'}`}
                 title="Jump to Live"
               >
                 <span className={`w-2 h-2 rounded-full ${isAtLiveEdge ? 'bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.8)] animate-pulse' : 'bg-neutral-600'}`}></span>
-                <span className="font-bold text-sm tracking-wider">LIVE</span>
+                <span className="font-bold text-xs sm:text-sm tracking-wider">LIVE</span>
               </button>
             </div>
 
-            <div className="flex items-center gap-2 md:gap-4">
-              <div className="hidden md:flex items-center gap-3 group/volume mr-2">
+            <div className="flex items-center gap-1 sm:gap-2 md:gap-4">
+              <div className="flex items-center gap-2 md:gap-3 group/volume mr-1 sm:mr-2">
                 <button 
                   onClick={(e) => { e.stopPropagation(); setIsMuted(!isMuted); }}
-                  className="text-white hover:text-blue-400 transition-colors focus:outline-none"
+                  className="text-white hover:text-blue-400 transition-colors focus:outline-none cursor-pointer p-1"
                 >
-                  {isMuted || volume === 0 ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
+                  {isMuted || volume === 0 ? <VolumeX className="w-5 h-5 sm:w-6 sm:h-6" /> : <Volume2 className="w-5 h-5 sm:w-6 sm:h-6" />}
                 </button>
                 <input 
                   type="range" 
@@ -524,7 +536,7 @@ export default function VideoPlayer() {
                   style={{
                     background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(isMuted ? 0 : volume) * 100}%, #525252 ${(isMuted ? 0 : volume) * 100}%, #525252 100%)`
                   }}
-                  className="w-20 md:w-24 h-1.5 md:h-2 rounded-full appearance-none outline-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 md:[&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-3 md:[&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-md hover:[&::-webkit-slider-thumb]:scale-125 [&::-webkit-slider-thumb]:transition-transform"
+                  className="hidden sm:block w-20 md:w-24 h-1.5 md:h-2 rounded-full appearance-none outline-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 md:[&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-3 md:[&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-md hover:[&::-webkit-slider-thumb]:scale-125 [&::-webkit-slider-thumb]:transition-transform"
                 />
               </div>
 
@@ -532,15 +544,15 @@ export default function VideoPlayer() {
                 <div className="relative">
                   <button 
                     onClick={(e) => { e.stopPropagation(); setShowQualityMenu(!showQualityMenu); }}
-                    className="text-white hover:text-blue-400 transition-colors focus:outline-none p-2 rounded-full"
+                    className="text-white hover:text-blue-400 transition-colors focus:outline-none p-1.5 sm:p-2 rounded-full cursor-pointer"
                     title="Stream Quality"
                   >
-                    <Settings className="w-5 h-5 md:w-6 md:h-6" />
+                    <Settings className="w-5 h-5 sm:w-6 sm:h-6" />
                   </button>
                   
                   {showQualityMenu && (
                     <div 
-                      className="absolute bottom-full right-0 mb-4 w-56 bg-neutral-900/95 backdrop-blur-xl border border-neutral-700/50 rounded-2xl p-2 shadow-2xl flex flex-col gap-1 z-50 pointer-events-auto"
+                      className="absolute bottom-full right-0 mb-4 w-52 sm:w-56 bg-neutral-900/95 backdrop-blur-xl border border-neutral-700/50 rounded-2xl p-2 shadow-2xl flex flex-col gap-1 z-50 pointer-events-auto"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <div className="text-xs font-semibold text-neutral-400 px-3 py-2 uppercase tracking-wider">
@@ -554,7 +566,7 @@ export default function VideoPlayer() {
                             manuallySetQuality(q);
                             setShowQualityMenu(false);
                           }}
-                          className={`px-3 py-2 text-sm text-left rounded-xl transition-colors ${
+                          className={`px-3 py-2 text-sm text-left rounded-xl transition-colors cursor-pointer ${
                             preferredQuality === q 
                               ? 'bg-blue-600 text-white font-medium' 
                               : 'text-neutral-300 hover:bg-neutral-800 hover:text-white'
@@ -575,27 +587,27 @@ export default function VideoPlayer() {
                     e.stopPropagation(); 
                     navigate(`/player/${previousChannelId}`, { state: { ...location.state, previousChannelId: channelId } }); 
                   }}
-                  className="p-2 text-white hover:text-blue-400 rounded-full transition-colors flex items-center justify-center focus:outline-none mr-1"
+                  className="p-1.5 sm:p-2 text-white hover:text-blue-400 rounded-full transition-colors flex items-center justify-center focus:outline-none mr-0.5 sm:mr-1 cursor-pointer"
                   title="Last Channel"
                 >
-                  <History className="w-6 h-6" />
+                  <History className="w-5 h-5 sm:w-6 sm:h-6" />
                 </button>
               )}
 
               {/* More Channels integrated into controls */}
               <button 
                 onClick={(e) => { e.stopPropagation(); setDrawerOpen(true); }}
-                className="p-2 text-white hover:text-blue-400 rounded-full transition-colors flex items-center justify-center focus:outline-none"
+                className="p-1.5 sm:p-2 text-white hover:text-blue-400 rounded-full transition-colors flex items-center justify-center focus:outline-none cursor-pointer"
                 title="More Channels"
               >
-                <Menu className="w-6 h-6" />
+                <Menu className="w-5 h-5 sm:w-6 sm:h-6" />
               </button>
 
               <button 
                 onClick={toggleFullscreen}
-                className="text-white hover:text-blue-400 transition-colors p-2 focus:outline-none"
+                className="text-white hover:text-blue-400 transition-colors p-1.5 sm:p-2 focus:outline-none cursor-pointer"
               >
-                {isFullscreen ? <Minimize className="w-7 h-7" /> : <Maximize className="w-7 h-7" />}
+                {isFullscreen ? <Minimize className="w-5 h-5 sm:w-7 sm:h-7" /> : <Maximize className="w-5 h-5 sm:w-7 sm:h-7" />}
               </button>
             </div>
           </div>
@@ -604,20 +616,20 @@ export default function VideoPlayer() {
 
       {/* Slide-out Drawer */}
       <div 
-        className={`absolute inset-y-0 right-0 w-80 md:w-96 bg-neutral-950/95 backdrop-blur-xl border-l border-neutral-800 z-50 transform transition-transform duration-300 ease-in-out flex flex-col ${
+        className={`absolute inset-y-0 right-0 w-full max-w-xs sm:w-80 md:w-96 bg-neutral-950/95 backdrop-blur-xl border-l border-neutral-800 z-50 transform transition-transform duration-300 ease-in-out flex flex-col ${
           drawerOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
         onClick={(e) => e.stopPropagation()} // Prevent closing when clicking inside
       >
-        <div className="p-6 border-b border-neutral-800/50 flex flex-col shrink-0">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-bold text-xl text-white">Channels</h3>
-            <button onClick={() => setDrawerOpen(false)} className="p-2 text-neutral-400 hover:text-white rounded-full hover:bg-neutral-800 transition-colors">
-              <X className="w-6 h-6" />
+        <div className="p-4 sm:p-6 border-b border-neutral-800/50 flex flex-col shrink-0">
+          <div className="flex items-center justify-between mb-2 sm:mb-4">
+            <h3 className="font-bold text-lg sm:text-xl text-white">Channels</h3>
+            <button onClick={() => setDrawerOpen(false)} className="p-2 text-neutral-400 hover:text-white rounded-full hover:bg-neutral-800 transition-colors cursor-pointer">
+              <X className="w-5 h-5 sm:w-6 sm:h-6" />
             </button>
           </div>
           
-          <div className="flex overflow-x-auto gap-2 pb-2 custom-scrollbar pointer-events-auto">
+          <div className="flex overflow-x-auto gap-2 pb-2 no-scrollbar pointer-events-auto">
             {availableCategories.map(cat => (
               <button
                 key={cat}

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { getApiUrl, fetchWithCache } from "../lib/api";
 import { useApi } from "../hooks/useApi";
 import { Tv } from "lucide-react";
+import { lockToLandscape } from "../lib/orientation";
 
 type Source = { id: number; name: string; type: string; url: string; epg_url: string; };
 
@@ -195,7 +196,7 @@ export default function EpgGrid() {
 
               const Wrapper: any = isActive ? Link : 'button';
               const wrapperProps: any = isActive 
-                ? { to: `/player/${ch.id}`, state: { from: '/guide' } }
+                ? { to: `/player/${ch.id}`, state: { from: '/guide' }, onClick: () => lockToLandscape() }
                 : { onClick: () => setSelectedProgram({ entry: e, channel: ch }) };
 
               return (
@@ -230,7 +231,7 @@ export default function EpgGrid() {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center p-4 pl-20 bg-neutral-950 h-full">
+      <div className="flex-1 flex items-center justify-center p-4 md:pl-20 pb-16 md:pb-0 bg-neutral-950 h-full">
         <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
       </div>
     );
@@ -238,13 +239,13 @@ export default function EpgGrid() {
 
   if (channels.length === 0 || entries.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center p-4 pl-20 bg-neutral-950 h-full">
-        <div className="bg-neutral-900/50 backdrop-blur-xl border border-neutral-800 rounded-2xl p-8 max-w-md text-center">
+      <div className="flex-1 flex items-center justify-center p-4 md:pl-20 pb-16 md:pb-0 bg-neutral-950 h-full">
+        <div className="bg-neutral-900/50 backdrop-blur-xl border border-neutral-800 rounded-2xl p-8 max-w-md text-center mx-4">
           <h2 className="text-2xl font-bold mb-3 text-white">No Guide Data</h2>
-          <p className="text-neutral-400 mb-6">
+          <p className="text-neutral-400 mb-6 text-sm sm:text-base">
             Configure your XMLTV EPG source in Settings to populate the guide. You may need to load the playlist again to map the channels first.
           </p>
-          <Link to="/settings" className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors">
+          <Link to="/settings" className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors cursor-pointer inline-block">
             Go to Settings
           </Link>
         </div>
@@ -273,16 +274,16 @@ export default function EpgGrid() {
   };
 
   return (
-    <div className="flex-1 flex flex-col pl-20 bg-neutral-950 overflow-hidden h-full relative">
+    <div className="flex-1 flex flex-col md:pl-20 pb-16 md:pb-0 bg-neutral-950 overflow-hidden h-full relative">
       
       {/* Top Source Tabs */}
       {sources && sources.length > 1 && (
-        <div className="absolute top-0 left-0 right-0 z-50 pl-24 pr-6 py-4 flex gap-2">
+        <div className="absolute top-0 left-0 right-0 z-50 px-4 sm:px-6 md:pl-24 md:pr-6 py-3 md:py-4 flex gap-2 overflow-x-auto no-scrollbar">
           {sources.map(src => (
             <button
               key={src.id}
               onClick={() => startTransition(() => setActiveSourceId(src.id))}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors backdrop-blur-md border ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors backdrop-blur-md border shrink-0 cursor-pointer ${
                 activeSourceId === src.id 
                   ? 'bg-blue-600/90 text-white border-blue-500 shadow-[0_0_15px_rgba(37,99,235,0.5)]' 
                   : 'bg-neutral-900/50 text-neutral-400 border-neutral-800 hover:text-white hover:bg-neutral-800'
@@ -296,15 +297,15 @@ export default function EpgGrid() {
       )}
 
       {/* Main UI Header with Categories */}
-      <div className={`shrink-0 border-b border-neutral-800/80 bg-neutral-900/40 backdrop-blur-md pl-24 z-40 relative flex items-center pr-6 overflow-x-auto no-scrollbar shadow-md ${sources && sources.length > 1 ? 'mt-16' : ''}`}>
-        <div className="p-6 pb-4 shrink-0 flex flex-col gap-4">
-          <h2 className="text-2xl font-bold text-white tracking-tight">Live TV Guide</h2>
-          <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
+      <div className={`shrink-0 border-b border-neutral-800/80 bg-neutral-900/40 backdrop-blur-md px-4 sm:px-6 md:pl-24 md:pr-6 z-40 relative flex items-center overflow-x-auto no-scrollbar shadow-md ${sources && sources.length > 1 ? 'mt-14 md:mt-16' : ''}`}>
+        <div className="py-4 md:py-6 shrink-0 flex flex-col gap-3 md:gap-4 w-full">
+          <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Live TV Guide</h2>
+          <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
             {availableCategories.map(cat => (
               <button
                 key={cat}
                 onClick={() => setActiveCategory(cat)}
-                className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
+                className={`px-3.5 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
                   activeCategory === cat 
                     ? 'bg-blue-600 text-white' 
                     : 'bg-neutral-800/50 text-neutral-400 hover:text-white hover:bg-neutral-800'

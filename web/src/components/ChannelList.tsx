@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Play, ChevronLeft, ChevronRight, Tv } from "lucide-react";
 import { getApiUrl, fetchWithCache } from "../lib/api";
 import { useApi } from "../hooks/useApi";
+import { lockToLandscape } from "../lib/orientation";
 
 type Source = { id: number; name: string; type: string; url: string; epg_url: string; };
 
@@ -57,19 +58,19 @@ const ChannelCarousel = memo(function ChannelCarousel({ groupName, channels, onH
 
   return (
     <div className="flex flex-col relative group/carousel">
-      <div className="flex justify-between items-end mb-4 pr-8 md:pr-12 pl-24 md:pl-28">
-        <h3 className="text-xl font-semibold text-white tracking-tight">{groupName}</h3>
-        <div className="flex space-x-2 opacity-0 group-hover/carousel:opacity-100 transition-opacity duration-300 pr-8 md:pr-12 absolute right-0 top-0">
+      <div className="flex justify-between items-end mb-3 md:mb-4 px-4 sm:px-6 md:pl-28 md:pr-12">
+        <h3 className="text-lg sm:text-xl font-semibold text-white tracking-tight">{groupName}</h3>
+        <div className="hidden md:flex space-x-2 opacity-0 group-hover/carousel:opacity-100 transition-opacity duration-300 pr-8 md:pr-12 absolute right-0 top-0">
           <button 
             onClick={() => scroll("left")}
-            className="p-2 rounded-full bg-neutral-800/80 text-white hover:bg-blue-600 transition-colors focus:outline-none"
+            className="p-2 rounded-full bg-neutral-800/80 text-white hover:bg-blue-600 transition-colors focus:outline-none cursor-pointer"
             aria-label="Scroll left"
           >
             <ChevronLeft className="w-5 h-5" />
           </button>
           <button 
             onClick={() => scroll("right")}
-            className="p-2 rounded-full bg-neutral-800/80 text-white hover:bg-blue-600 transition-colors focus:outline-none"
+            className="p-2 rounded-full bg-neutral-800/80 text-white hover:bg-blue-600 transition-colors focus:outline-none cursor-pointer"
             aria-label="Scroll right"
           >
             <ChevronRight className="w-5 h-5" />
@@ -79,21 +80,22 @@ const ChannelCarousel = memo(function ChannelCarousel({ groupName, channels, onH
       
       <div 
         ref={scrollRef}
-        className="flex gap-4 overflow-x-auto pb-6 pt-2 pr-8 md:pr-12 no-scrollbar snap-x snap-mandatory scroll-smooth"
+        className="flex gap-3 sm:gap-4 overflow-x-auto pb-4 md:pb-6 pt-1 md:pt-2 px-4 sm:px-6 md:pr-12 no-scrollbar snap-x snap-mandatory scroll-smooth"
       >
-        <div className="w-20 md:w-24 shrink-0 snap-start"></div>
+        <div className="hidden md:block md:w-24 shrink-0 snap-start"></div>
         {channels.map((ch) => (
           <Link
             key={ch.id}
             to={`/player/${ch.id}`}
             state={{ from: '/channels' }}
+            onClick={() => lockToLandscape()}
             onMouseEnter={() => onHover(ch)}
             onFocus={() => onHover(ch)}
-            className="group relative flex-none w-[280px] aspect-video bg-neutral-900 rounded-xl overflow-hidden snap-start transition-all duration-300 hover:scale-105 hover:z-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-neutral-950 shadow-lg border-2 border-transparent hover:border-blue-500 hover:shadow-[0_0_20px_rgba(59,130,246,0.6)]"
+            className="group relative flex-none w-[220px] sm:w-[280px] aspect-video bg-neutral-900 rounded-xl overflow-hidden snap-start transition-all duration-300 hover:scale-105 hover:z-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-neutral-950 shadow-lg border-2 border-transparent hover:border-blue-500 hover:shadow-[0_0_20px_rgba(59,130,246,0.6)]"
           >
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity z-10" />
             
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-6 z-20">
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 sm:p-6 z-20">
               {ch.logo_url ? (
                 <img
                   src={ch.logo_url}
@@ -102,15 +104,15 @@ const ChannelCarousel = memo(function ChannelCarousel({ groupName, channels, onH
                 />
               ) : (
                 <>
-                  <span className="text-5xl text-neutral-600 group-hover:text-neutral-400 transition-colors mb-2">📺</span>
-                  <span className="text-neutral-400 font-medium text-center truncate w-full px-2">{ch.name}</span>
+                  <span className="text-4xl sm:text-5xl text-neutral-600 group-hover:text-neutral-400 transition-colors mb-2">📺</span>
+                  <span className="text-neutral-400 font-medium text-center truncate w-full px-2 text-sm">{ch.name}</span>
                 </>
               )}
             </div>
           </Link>
         ))}
-        {/* Right padding spacer since browsers ignore padding-right on scroll containers */}
-        <div className="w-1 shrink-0"></div>
+        {/* Right padding spacer */}
+        <div className="w-4 md:w-1 shrink-0"></div>
       </div>
     </div>
   );
@@ -239,16 +241,16 @@ export default function ChannelList() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto overflow-x-hidden relative no-scrollbar animate-in fade-in duration-500">
+    <div className="flex-1 overflow-y-auto overflow-x-hidden relative no-scrollbar animate-in fade-in duration-500 pb-20 md:pb-0">
       
       {/* Top Source Tabs */}
       {sources && sources.length > 1 && (
-        <div className="relative pt-4 pb-2 px-24 z-50 flex gap-2">
+        <div className="relative pt-4 pb-2 px-4 sm:px-6 md:pl-28 md:pr-12 z-50 flex gap-2 overflow-x-auto no-scrollbar">
           {sources.map(src => (
             <button
               key={src.id}
               onClick={() => startTransition(() => setActiveSourceId(src.id))}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors backdrop-blur-md border ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors backdrop-blur-md border shrink-0 cursor-pointer ${
                 activeSourceId === src.id 
                   ? 'bg-blue-600/90 text-white border-blue-500 shadow-[0_0_15px_rgba(37,99,235,0.5)]' 
                   : 'bg-neutral-900/50 text-neutral-400 border-neutral-800 hover:text-white hover:bg-neutral-800'
@@ -263,7 +265,7 @@ export default function ChannelList() {
 
       {/* Hero Section */}
       {activeHeroChannel && (
-        <div className="relative h-[65vh] min-h-[500px] w-full flex items-end pb-16 pr-8 md:pr-12 pl-24 md:pl-28 shrink-0 overflow-hidden">
+        <div className="relative min-h-[380px] sm:min-h-[460px] md:min-h-[500px] md:h-[65vh] w-full flex items-end pt-6 md:pt-0 pb-10 sm:pb-14 md:pb-16 px-4 sm:px-6 md:pl-28 md:pr-12 shrink-0 overflow-hidden">
           
           {/* Background Image / Ambient Gradients */}
           <div className="absolute inset-0 bg-neutral-950 overflow-hidden">
@@ -294,36 +296,36 @@ export default function ChannelList() {
                 key={activeHeroChannel.logo_url}
                 src={activeHeroChannel.logo_url} 
                 alt="Logo" 
-                className="h-16 mb-6 object-contain drop-shadow-lg" 
+                className="h-10 sm:h-12 md:h-16 mb-4 md:mb-6 object-contain drop-shadow-lg" 
               />
             )}
             
             {heroProgram ? (
               <div key={heroProgram.id}>
-                <div className="flex items-center gap-3 mb-4">
+                <div className="flex items-center gap-2 sm:gap-3 mb-3 md:mb-4 flex-wrap">
                   <span className="flex items-center text-xs font-bold uppercase tracking-wider text-red-500 bg-red-500/10 px-2 py-1 rounded">
                     <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse mr-2" />
                     Live
                   </span>
-                  <span className="text-sm font-medium text-blue-300 bg-blue-500/10 px-2 py-1 rounded">
+                  <span className="text-xs sm:text-sm font-medium text-blue-300 bg-blue-500/10 px-2 py-1 rounded">
                     {new Date(heroProgram.start_time).toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})} - {new Date(heroProgram.end_time).toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})}
                   </span>
                 </div>
                 
-                <h1 className="text-5xl md:text-7xl font-extrabold text-white mb-4 tracking-tight drop-shadow-2xl leading-tight">
+                <h1 className="text-3xl sm:text-5xl md:text-7xl font-extrabold text-white mb-3 md:mb-4 tracking-tight drop-shadow-2xl leading-tight">
                   {heroProgram.title}
                 </h1>
                 
-                <p className="text-lg md:text-xl text-neutral-300 mb-8 max-w-2xl line-clamp-3 leading-relaxed drop-shadow-md">
+                <p className="text-sm sm:text-base md:text-xl text-neutral-300 mb-6 md:mb-8 max-w-2xl line-clamp-2 sm:line-clamp-3 leading-relaxed drop-shadow-md">
                   {heroProgram.description || `Start watching the best of ${activeHeroChannel.group_title || "Live TV"} right now on your personal media center.`}
                 </p>
               </div>
             ) : (
               <div key={activeHeroChannel.id}>
-                <h1 className="text-5xl md:text-7xl font-extrabold text-white mb-4 tracking-tight drop-shadow-2xl leading-tight">
+                <h1 className="text-3xl sm:text-5xl md:text-7xl font-extrabold text-white mb-3 md:mb-4 tracking-tight drop-shadow-2xl leading-tight">
                   {activeHeroChannel.name}
                 </h1>
-                <p className="text-lg md:text-xl text-neutral-300 mb-8 max-w-2xl line-clamp-2 leading-relaxed drop-shadow-md">
+                <p className="text-sm sm:text-base md:text-xl text-neutral-300 mb-6 md:mb-8 max-w-2xl line-clamp-2 leading-relaxed drop-shadow-md">
                   Start watching the best of {activeHeroChannel.group_title || "Live TV"} right now on your personal media center.
                 </p>
               </div>
@@ -332,9 +334,10 @@ export default function ChannelList() {
             <Link
               to={`/player/${activeHeroChannel.id}`}
               state={{ from: '/channels' }}
-              className="inline-flex items-center justify-center px-8 py-4 bg-white text-black hover:bg-neutral-200 hover:shadow-[0_0_30px_rgba(255,255,255,0.3)] font-semibold rounded-full transition-all duration-300 hover:scale-105 active:scale-95"
+              onClick={() => lockToLandscape()}
+              className="inline-flex items-center justify-center px-6 sm:px-8 py-3 sm:py-4 bg-white text-black hover:bg-neutral-200 hover:shadow-[0_0_30px_rgba(255,255,255,0.3)] font-semibold rounded-full transition-all duration-300 hover:scale-105 active:scale-95 text-sm sm:text-base cursor-pointer"
             >
-              <Play className="w-5 h-5 mr-2 fill-black" />
+              <Play className="w-4 h-4 sm:w-5 sm:h-5 mr-2 fill-black" />
               Watch Now
             </Link>
           </div>
@@ -342,13 +345,13 @@ export default function ChannelList() {
       )}
 
       {/* Channel Groups */}
-      <div className="pb-24 -mt-10 relative z-20 space-y-4">
-        <div className="flex gap-2 overflow-x-auto pb-2 pl-24 md:pl-28 pr-8 md:pr-12 custom-scrollbar">
+      <div className="pb-24 -mt-6 md:-mt-10 relative z-20 space-y-4">
+        <div className="flex gap-2 overflow-x-auto pb-2 px-4 sm:px-6 md:pl-28 md:pr-12 no-scrollbar">
           {availableCategories.map(cat => (
             <button
               key={cat}
               onClick={() => setActiveCategory(cat)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
+              className={`px-3.5 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
                 activeCategory === cat 
                   ? 'bg-blue-600 text-white shadow-md' 
                   : 'bg-neutral-800/80 text-neutral-400 hover:text-white hover:bg-neutral-700 backdrop-blur-sm'

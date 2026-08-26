@@ -14,6 +14,7 @@ import {
   Play,
   Pause
 } from "lucide-react";
+import { lockToLandscape, unlockScreenOrientation } from "../lib/orientation";
 
 type SourceRow = {
   id: number;
@@ -24,15 +25,19 @@ type SourceRow = {
 };
 
 // =========================================================
-// Global In-Memory Camera Stream Cache for 0ms transitions
+// Global In-Memory Camera Stream Cache for 0ms transitions & Auto-Recovery
 // =========================================================
 type CachedStream = {
+  source: SourceRow;
   mediaStream: MediaStream;
-  pc: RTCPeerConnection;
-  streamId: string;
-  sessionId: string;
-  subscribers: Set<string>;
+  pc?: RTCPeerConnection;
+  streamId?: string;
+  sessionId?: string;
+  subscribers: Map<string, (stream: MediaStream) => void>;
+  connected: boolean;
+  connecting: boolean;
   cleanupTimer?: ReturnType<typeof setTimeout>;
+  retryTimer?: ReturnType<typeof setTimeout>;
 };
 
 const cameraStreamCache = new Map<number, CachedStream>();
@@ -41,7 +46,7 @@ const cameraStreamCache = new Map<number, CachedStream>();
 if (typeof window !== "undefined") {
   setInterval(() => {
     cameraStreamCache.forEach((entry) => {
-      if (entry.streamId && entry.subscribers.size > 0) {
+      if (entry.streamId && entry.subscribers.size > 0 && entry.connected) {
         fetch(getApiUrl(`/api/stream/heartbeat/${entry.streamId}`)).catch(() => {});
       }
     });
@@ -50,83 +55,171 @@ if (typeof window !== "undefined") {
 
 function getActiveStream(sourceId: number): CachedStream | undefined {
   const entry = cameraStreamCache.get(sourceId);
-  if (entry && entry.pc.connectionState !== "closed" && entry.pc.connectionState !== "failed") {
+  if (
+    entry &&
+    entry.connected &&
+    entry.mediaStream &&
+    entry.mediaStream.getTracks().length > 0 &&
+    entry.pc &&
+    entry.pc.connectionState !== "closed" &&
+    entry.pc.connectionState !== "failed" &&
+    entry.pc.connectionState !== "disconnected"
+  ) {
     return entry;
   }
   return undefined;
 }
 
-async function acquireCameraStream(
+function destroyCameraConnection(entry: CachedStream) {
+  if (entry.pc) {
+    try {
+      entry.pc.ontrack = null;
+      entry.pc.onconnectionstatechange = null;
+      entry.pc.close();
+    } catch {}
+    entry.pc = undefined;
+  }
+  if (entry.sessionId) {
+    fetch(getApiUrl(`/api/stream/stop/${entry.sessionId}`), { method: "DELETE" }).catch(() => {});
+    entry.sessionId = undefined;
+    entry.streamId = undefined;
+  }
+  entry.connected = false;
+  entry.connecting = false;
+}
+
+async function startCameraConnection(entry: CachedStream) {
+  if (entry.connecting) return;
+  entry.connecting = true;
+
+  if (entry.retryTimer) {
+    clearTimeout(entry.retryTimer);
+    entry.retryTimer = undefined;
+  }
+
+  // Clean up any stale peer connection first
+  if (entry.pc) {
+    try {
+      entry.pc.close();
+    } catch {}
+    entry.pc = undefined;
+  }
+
+  try {
+    const pc = new RTCPeerConnection({ iceServers: [] });
+    entry.pc = pc;
+    pc.addTransceiver("video", { direction: "recvonly" });
+    pc.addTransceiver("audio", { direction: "recvonly" });
+
+    pc.ontrack = (event) => {
+      if (!entry.mediaStream.getTracks().some(t => t.id === event.track.id)) {
+        entry.mediaStream.addTrack(event.track);
+      }
+      entry.subscribers.forEach((cb) => cb(entry.mediaStream));
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "failed" || pc.connectionState === "disconnected" || pc.connectionState === "closed") {
+        console.warn(`[Camera WebRTC] Connection state ${pc.connectionState} for camera ${entry.source.id}`);
+        destroyCameraConnection(entry);
+        scheduleRetry(entry);
+      }
+    };
+
+    // Request stream from backend
+    const startRes = await fetch(getApiUrl("/api/stream/start"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: entry.source.url, tuner_type: "rtsp", quality: "720p_std" }),
+    });
+    if (!startRes.ok) {
+      throw new Error(`Start stream HTTP ${startRes.status}`);
+    }
+    const startData = await startRes.json();
+    const streamId = startData.id;
+    entry.streamId = streamId;
+    entry.sessionId = streamId;
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    // WHEP handshake loop (retries up to 25 times, 300ms delay)
+    let connected = false;
+    let attempts = 0;
+    while (!connected && attempts < 25 && entry.subscribers.size > 0 && entry.connecting) {
+      attempts++;
+      try {
+        const res = await fetch(`http://${window.location.hostname}:8889/${streamId}/whep`, {
+          method: "POST",
+          headers: { "Content-Type": "application/sdp" },
+          body: offer.sdp,
+        });
+        if (res.ok) {
+          const answerSdp = await res.text();
+          await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: answerSdp }));
+          connected = true;
+          entry.connected = true;
+          entry.connecting = false;
+          entry.subscribers.forEach((cb) => cb(entry.mediaStream));
+          return;
+        }
+      } catch (e) {
+        // retry
+      }
+      await new Promise((r) => setTimeout(r, 300));
+    }
+
+    if (!connected) {
+      throw new Error("WHEP handshake timeout");
+    }
+  } catch (err) {
+    destroyCameraConnection(entry);
+    scheduleRetry(entry);
+  }
+}
+
+function scheduleRetry(entry: CachedStream) {
+  if (entry.subscribers.size === 0) return;
+  if (entry.retryTimer) return;
+  entry.retryTimer = setTimeout(() => {
+    entry.retryTimer = undefined;
+    if (entry.subscribers.size > 0 && !entry.connected && !entry.connecting) {
+      startCameraConnection(entry);
+    }
+  }, 4000);
+}
+
+function acquireCameraStream(
   source: SourceRow,
   subscriberId: string,
   onStreamReady: (stream: MediaStream) => void
-): Promise<CachedStream> {
-  let entry = getActiveStream(source.id);
-  if (entry) {
-    if (entry.cleanupTimer) {
-      clearTimeout(entry.cleanupTimer);
-      entry.cleanupTimer = undefined;
-    }
-    entry.subscribers.add(subscriberId);
+) {
+  let entry = cameraStreamCache.get(source.id);
+  if (!entry) {
+    entry = {
+      source,
+      mediaStream: new MediaStream(),
+      subscribers: new Map([[subscriberId, onStreamReady]]),
+      connected: false,
+      connecting: false,
+    };
+    cameraStreamCache.set(source.id, entry);
+    startCameraConnection(entry);
+    return;
+  }
+
+  if (entry.cleanupTimer) {
+    clearTimeout(entry.cleanupTimer);
+    entry.cleanupTimer = undefined;
+  }
+
+  entry.subscribers.set(subscriberId, onStreamReady);
+
+  if (entry.connected && entry.mediaStream.getTracks().length > 0) {
     onStreamReady(entry.mediaStream);
-    return entry;
+  } else if (!entry.connecting) {
+    startCameraConnection(entry);
   }
-
-  const mediaStream = new MediaStream();
-  const pc = new RTCPeerConnection({ iceServers: [] });
-  pc.addTransceiver("video", { direction: "recvonly" });
-  pc.addTransceiver("audio", { direction: "recvonly" });
-
-  pc.ontrack = (event) => {
-    mediaStream.addTrack(event.track);
-    onStreamReady(mediaStream);
-  };
-
-  // Start stream on backend
-  const startRes = await fetch(getApiUrl("/api/stream/start"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url: source.url, tuner_type: "rtsp", quality: "720p_std" }),
-  });
-  const startData = await startRes.json();
-  const streamId = startData.id;
-
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-
-  entry = {
-    mediaStream,
-    pc,
-    streamId,
-    sessionId: streamId,
-    subscribers: new Set([subscriberId]),
-  };
-  cameraStreamCache.set(source.id, entry);
-
-  // WHEP handshake retry loop
-  let connected = false;
-  let attempts = 0;
-  while (!connected && attempts < 25) {
-    attempts++;
-    try {
-      const res = await fetch(`http://${window.location.hostname}:8889/${streamId}/whep`, {
-        method: "POST",
-        headers: { "Content-Type": "application/sdp" },
-        body: offer.sdp,
-      });
-      if (res.ok) {
-        const answerSdp = await res.text();
-        await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: answerSdp }));
-        connected = true;
-        break;
-      }
-    } catch (e) {
-      // retry
-    }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-
-  return entry;
 }
 
 function releaseCameraStream(sourceId: number, subscriberId: string) {
@@ -136,12 +229,15 @@ function releaseCameraStream(sourceId: number, subscriberId: string) {
 
   if (entry.subscribers.size === 0) {
     if (entry.cleanupTimer) clearTimeout(entry.cleanupTimer);
+    if (entry.retryTimer) {
+      clearTimeout(entry.retryTimer);
+      entry.retryTimer = undefined;
+    }
     // Keep stream in memory for 15 seconds to allow fast re-entry
     entry.cleanupTimer = setTimeout(() => {
       const current = cameraStreamCache.get(sourceId);
       if (current && current.subscribers.size === 0) {
-        current.pc.close();
-        fetch(getApiUrl(`/api/stream/stop/${current.sessionId}`), { method: "DELETE" }).catch(() => {});
+        destroyCameraConnection(current);
         cameraStreamCache.delete(sourceId);
       }
     }, 15000);
@@ -207,8 +303,17 @@ function CameraPlayerView({
     };
   }, [handleMouseMove, camera]);
 
+  // Automatic landscape orientation on focus mount & restore on unmount
+  useEffect(() => {
+    lockToLandscape(containerRef.current, videoRef.current);
+    return () => {
+      unlockScreenOrientation();
+    };
+  }, []);
+
   const togglePlay = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
+    lockToLandscape(containerRef.current, videoRef.current);
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
@@ -226,15 +331,20 @@ function CameraPlayerView({
     if (!container) return;
 
     if (!document.fullscreenElement) {
-      container.requestFullscreen().catch(console.error);
+      lockToLandscape(container, videoRef.current);
     } else {
       document.exitFullscreen().catch(console.error);
+      unlockScreenOrientation();
     }
   }, []);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const isFull = !!document.fullscreenElement;
+      setIsFullscreen(isFull);
+      if (isFull) {
+        lockToLandscape(containerRef.current, videoRef.current);
+      }
     };
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
@@ -315,8 +425,6 @@ function CameraPlayerView({
           setStatus("");
         });
       }
-    }).catch((err) => {
-      if (isMounted) setStatus(err.message || "Failed to load stream");
     });
 
     return () => {
@@ -330,7 +438,7 @@ function CameraPlayerView({
       ref={containerRef}
       className="flex-1 flex flex-col bg-black relative overflow-hidden cursor-default group h-screen w-screen"
       onMouseMove={handleMouseMove}
-      onClick={togglePlay}
+      onClick={handleMouseMove}
     >
       {/* Video Display (Native HTML5 video, no iframe, no browser controls popup) */}
       <video
@@ -386,25 +494,25 @@ function CameraPlayerView({
         </div>
 
         {/* Custom Bottom Controls (exact match to VideoPlayer.tsx) */}
-        <div className="h-48 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex items-end p-6 md:p-8">
+        <div className="h-36 sm:h-48 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex items-end p-4 sm:p-6 md:p-8">
           <div className="w-full flex items-center justify-between pointer-events-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-4 md:gap-6">
+            <div className="flex items-center gap-3 sm:gap-4 md:gap-6">
               <button 
                 onClick={togglePlay} 
                 className="text-white hover:text-blue-400 transition-colors focus:outline-none cursor-pointer"
               >
-                {isPlaying ? <Pause className="w-8 h-8 md:w-10 md:h-10 fill-current" /> : <Play className="w-8 h-8 md:w-10 md:h-10 fill-current" />}
+                {isPlaying ? <Pause className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 fill-current" /> : <Play className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 fill-current" />}
               </button>
 
-              <div className="flex items-center gap-2 transition-colors">
+              <div className="flex items-center gap-1.5 sm:gap-2 transition-colors">
                 <span className="w-2 h-2 rounded-full bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.8)] animate-pulse"></span>
-                <span className="font-bold text-sm tracking-wider text-white/90">LIVE</span>
+                <span className="font-bold text-xs sm:text-sm tracking-wider text-white/90">LIVE</span>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 md:gap-4">
+            <div className="flex items-center gap-1 sm:gap-2 md:gap-4">
               {/* Audio Controls */}
-              <div className="hidden md:flex items-center gap-3 group/volume mr-2">
+              <div className="flex items-center gap-2 md:gap-3 group/volume mr-1 sm:mr-2">
                 <button 
                   onClick={(e) => { 
                     e.stopPropagation(); 
@@ -417,10 +525,10 @@ function CameraPlayerView({
                       }
                     }
                   }}
-                  className="text-white hover:text-blue-400 transition-colors focus:outline-none cursor-pointer"
+                  className="text-white hover:text-blue-400 transition-colors focus:outline-none cursor-pointer p-1"
                   title={isMuted ? "Unmute" : "Mute"}
                 >
-                  {isMuted || volume === 0 ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
+                  {isMuted || volume === 0 ? <VolumeX className="w-5 h-5 sm:w-6 sm:h-6" /> : <Volume2 className="w-5 h-5 sm:w-6 sm:h-6" />}
                 </button>
                 <input 
                   type="range" 
@@ -441,24 +549,24 @@ function CameraPlayerView({
                   style={{
                     background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(isMuted ? 0 : volume) * 100}%, #525252 ${(isMuted ? 0 : volume) * 100}%, #525252 100%)`
                   }}
-                  className="w-20 md:w-24 h-1.5 md:h-2 rounded-full appearance-none outline-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 md:[&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-3 md:[&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-md hover:[&::-webkit-slider-thumb]:scale-125 [&::-webkit-slider-thumb]:transition-transform"
+                  className="hidden sm:block w-20 md:w-24 h-1.5 md:h-2 rounded-full appearance-none outline-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 md:[&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-3 md:[&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-md hover:[&::-webkit-slider-thumb]:scale-125 [&::-webkit-slider-thumb]:transition-transform"
                 />
               </div>
 
               {/* More Cameras button */}
               <button 
                 onClick={(e) => { e.stopPropagation(); setDrawerOpen(true); }}
-                className="p-2 text-white hover:text-blue-400 rounded-full transition-colors flex items-center justify-center focus:outline-none cursor-pointer"
+                className="p-1.5 sm:p-2 text-white hover:text-blue-400 rounded-full transition-colors flex items-center justify-center focus:outline-none cursor-pointer"
                 title="More Cameras"
               >
-                <Menu className="w-6 h-6" />
+                <Menu className="w-5 h-5 sm:w-6 sm:h-6" />
               </button>
 
               <button 
                 onClick={toggleFullscreen}
-                className="text-white hover:text-blue-400 transition-colors p-2 focus:outline-none cursor-pointer"
+                className="text-white hover:text-blue-400 transition-colors p-1.5 sm:p-2 focus:outline-none cursor-pointer"
               >
-                {isFullscreen ? <Minimize className="w-7 h-7" /> : <Maximize className="w-7 h-7" />}
+                {isFullscreen ? <Minimize className="w-5 h-5 sm:w-7 sm:h-7" /> : <Maximize className="w-5 h-5 sm:w-7 sm:h-7" />}
               </button>
             </div>
           </div>
@@ -467,16 +575,16 @@ function CameraPlayerView({
 
       {/* Slide-out Drawer (exact match to VideoPlayer.tsx) */}
       <div 
-        className={`absolute inset-y-0 right-0 w-80 md:w-96 bg-neutral-950/95 backdrop-blur-xl border-l border-neutral-800 z-50 transform transition-transform duration-300 ease-in-out flex flex-col ${
+        className={`absolute inset-y-0 right-0 w-full max-w-xs sm:w-80 md:w-96 bg-neutral-950/95 backdrop-blur-xl border-l border-neutral-800 z-50 transform transition-transform duration-300 ease-in-out flex flex-col ${
           drawerOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-6 border-b border-neutral-800/50 flex flex-col shrink-0">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-bold text-xl text-white">Cameras</h3>
+        <div className="p-4 sm:p-6 border-b border-neutral-800/50 flex flex-col shrink-0">
+          <div className="flex items-center justify-between mb-2 sm:mb-4">
+            <h3 className="font-bold text-lg sm:text-xl text-white">Cameras</h3>
             <button onClick={() => setDrawerOpen(false)} className="p-2 text-neutral-400 hover:text-white rounded-full hover:bg-neutral-800 transition-colors cursor-pointer">
-              <X className="w-6 h-6" />
+              <X className="w-5 h-5 sm:w-6 sm:h-6" />
             </button>
           </div>
         </div>
@@ -549,14 +657,18 @@ function CameraCard({
   return (
     <div
       tabIndex={0}
-      onClick={() => onSelect(source)}
+      onClick={() => {
+        lockToLandscape();
+        onSelect(source);
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
+          lockToLandscape();
           onSelect(source);
         }
       }}
-      className="group relative flex-none w-[280px] md:w-[320px] aspect-video bg-neutral-900 rounded-xl overflow-hidden snap-start transition-all duration-300 hover:scale-105 hover:z-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-neutral-950 shadow-lg border-2 border-transparent hover:border-blue-500 hover:shadow-[0_0_20px_rgba(59,130,246,0.6)] cursor-pointer"
+      className="group relative w-full sm:w-[calc(50%-12px)] lg:w-[320px] aspect-video bg-neutral-900 rounded-xl overflow-hidden snap-start transition-all duration-300 hover:scale-105 hover:z-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-neutral-950 shadow-lg border-2 border-transparent hover:border-blue-500 hover:shadow-[0_0_20px_rgba(59,130,246,0.6)] cursor-pointer shrink-0"
     >
       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity z-10" />
 
@@ -599,16 +711,16 @@ export default function Cameras() {
     <>
       {/* Grid View (kept mounted in background so all camera feeds remain live and instant) */}
       <div 
-        className={`flex-1 overflow-y-auto overflow-x-hidden relative no-scrollbar pl-24 md:pl-28 pr-8 md:pr-12 pt-8 ${
+        className={`flex-1 overflow-y-auto overflow-x-hidden relative no-scrollbar px-4 sm:px-6 md:pl-28 md:pr-12 pt-6 sm:pt-8 pb-20 md:pb-8 ${
           selectedCamera ? 'hidden' : 'block animate-in fade-in duration-300'
         }`}
       >
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl md:text-5xl font-extrabold text-white tracking-tight drop-shadow-lg">
+        <div className="mb-6 sm:mb-8">
+          <h1 className="text-2xl sm:text-3xl md:text-5xl font-extrabold text-white tracking-tight drop-shadow-lg">
             Security Cameras
           </h1>
-          <p className="text-neutral-400 mt-2 text-base md:text-lg">
+          <p className="text-neutral-400 mt-1 sm:mt-2 text-sm sm:text-base md:text-lg">
             Live feeds from your RTSP security cameras
           </p>
         </div>
@@ -624,17 +736,17 @@ export default function Cameras() {
         )}
 
         {!loading && !error && cameras.length === 0 && (
-          <div className="bg-neutral-900/50 backdrop-blur-xl border border-neutral-800 rounded-2xl p-12 max-w-md text-center">
+          <div className="bg-neutral-900/50 backdrop-blur-xl border border-neutral-800 rounded-2xl p-8 sm:p-12 max-w-md text-center mx-auto">
             <Video className="w-12 h-12 text-neutral-600 mx-auto mb-4" />
             <h2 className="text-2xl font-bold mb-3 text-white">No Cameras Found</h2>
-            <p className="text-neutral-400 mb-6">
+            <p className="text-neutral-400 mb-6 text-sm sm:text-base">
               You haven't added any security cameras yet. Head over to Settings to add an RTSP camera stream.
             </p>
           </div>
         )}
 
         {cameras.length > 0 && (
-          <div className="flex flex-wrap gap-6 pb-24">
+          <div className="flex flex-wrap gap-4 sm:gap-6 pb-24">
             {cameras.map((cam) => (
               <CameraCard
                 key={cam.id}

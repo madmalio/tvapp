@@ -10,8 +10,8 @@ const navItems = [
 
 export default function Sidebar() {
   return (
-    <aside className="fixed inset-y-0 left-0 w-16 bg-neutral-950/80 backdrop-blur-md border-r border-neutral-800/50 flex flex-col items-center justify-center z-50">
-      <nav className="flex flex-col space-y-6">
+    <aside className="fixed bottom-0 inset-x-0 h-16 bg-neutral-950/90 backdrop-blur-xl border-t border-neutral-800/80 z-50 flex items-center justify-around md:fixed md:inset-y-0 md:left-0 md:w-16 md:h-full md:border-t-0 md:border-r md:flex-col md:justify-center md:bg-neutral-950/80">
+      <nav className="flex flex-row items-center justify-around w-full px-4 md:px-0 md:w-auto md:flex-col md:space-y-6">
         {navItems.map((item) => {
           const Icon = item.icon;
           return (
@@ -19,15 +19,16 @@ export default function Sidebar() {
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
-                `flex items-center justify-center p-3 rounded-2xl transition-all duration-200 ${
+                `flex flex-col md:flex-row items-center justify-center p-2 sm:p-3 rounded-2xl transition-all duration-200 cursor-pointer ${
                   isActive
-                    ? "bg-blue-600/20 text-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]"
+                    ? "bg-blue-600/20 text-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] scale-105"
                     : "text-neutral-500 hover:text-white hover:bg-neutral-800/80 hover:scale-110"
                 }`
               }
               title={item.label}
             >
-              <Icon className="w-6 h-6" />
+              <Icon className="w-5 h-5 sm:w-6 sm:h-6" />
+              <span className="text-[10px] font-medium mt-0.5 md:hidden">{item.label}</span>
             </NavLink>
           );
         })}
