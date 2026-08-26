@@ -12,9 +12,11 @@ import {
   Volume2, 
   VolumeX,
   Play,
-  Pause
+  Pause,
+  PictureInPicture2
 } from "lucide-react";
 import { lockToLandscape, unlockScreenOrientation } from "../lib/orientation";
+import { usePlayer } from "../context/PlayerContext";
 
 type SourceRow = {
   id: number;
@@ -260,10 +262,12 @@ function CameraPlayerView({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const [status, setStatus] = useState("Loading...");
   const [isPlaying, setIsPlaying] = useState(true);
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [status, setStatus] = useState("Loading...");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const { playCamera } = usePlayer();
 
   const [volume, setVolume] = useState(() => {
     const saved = localStorage.getItem("tvapp_camera_volume");
@@ -271,12 +275,29 @@ function CameraPlayerView({
   });
   const [isMuted, setIsMuted] = useState(() => {
     const saved = localStorage.getItem("tvapp_camera_muted");
-    return saved !== null ? saved === "true" : true; // default cameras to muted if not set
+    return saved !== null ? saved === "true" : true;
   });
 
-  const [showOverlay, setShowOverlay] = useState(true);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const toggleNativePip = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const video = videoRef.current;
+    if (!video) return;
+
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else if (typeof video.requestPictureInPicture === "function") {
+        await video.requestPictureInPicture();
+      } else if (typeof (video as any).webkitSetPresentationMode === "function") {
+        const current = (video as any).webkitPresentationMode;
+        (video as any).webkitSetPresentationMode(current === "picture-in-picture" ? "inline" : "picture-in-picture");
+      }
+    } catch (err) {
+      console.warn("Native PiP error:", err);
+    }
+  }, []);
 
   // Sync volume and mute directly with the HTML5 video element
   useEffect(() => {
@@ -390,6 +411,7 @@ function CameraPlayerView({
 
     const subId = `focus-${camera.id}`;
     let isMounted = true;
+    playCamera(camera);
 
     // Check if stream already exists in memory (from grid or cache)
     const cached = getActiveStream(camera.id);
@@ -552,6 +574,15 @@ function CameraPlayerView({
                   className="hidden sm:block w-20 md:w-24 h-1.5 md:h-2 rounded-full appearance-none outline-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 md:[&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-3 md:[&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-md hover:[&::-webkit-slider-thumb]:scale-125 [&::-webkit-slider-thumb]:transition-transform"
                 />
               </div>
+
+              {/* Picture in Picture */}
+              <button 
+                onClick={toggleNativePip}
+                className="p-1.5 sm:p-2 text-white hover:text-blue-400 rounded-full transition-colors flex items-center justify-center focus:outline-none cursor-pointer"
+                title="Picture in Picture"
+              >
+                <PictureInPicture2 className="w-5 h-5 sm:w-6 sm:h-6" />
+              </button>
 
               {/* More Cameras button */}
               <button 

@@ -1,20 +1,27 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
-import { ArrowLeft, Menu, X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, History, Settings } from "lucide-react";
+import { 
+  ArrowLeft, 
+  Menu, 
+  X, 
+  Play, 
+  Pause, 
+  Volume2, 
+  VolumeX, 
+  Maximize, 
+  Minimize, 
+  History, 
+  Settings,
+  PictureInPicture2,
+  Video,
+  Maximize2
+} from "lucide-react";
 import Hls from "hls.js";
 import { getApiUrl, fetchWithCache } from "../lib/api";
 import { useSpeedTest, StreamQuality } from "../hooks/useSpeedTest";
 import { lockToLandscape, unlockScreenOrientation } from "../lib/orientation";
-
-type ChannelInfo = {
-  id: number;
-  name: string;
-  stream_url: string;
-  logo_url?: string;
-  group_title?: string;
-  tuner_type?: string;
-  source_id?: number;
-};
+import { usePlayer, CameraInfo, ChannelInfo } from "../context/PlayerContext";
+import { useApi } from "../hooks/useApi";
 
 const CATEGORIES = ['All', 'Movies', 'News', 'Sports', 'Kids', 'Entertainment', 'Docs & Learning', 'Music', 'Local', 'Other'];
 
@@ -38,6 +45,145 @@ function mapCategory(rawGroup: string, channelName: string = ""): string {
 
 const MAX_RELOADS = 3;
 
+// =========================================================
+// Pinned Camera PiP Overlay inside TV Player
+// =========================================================
+function PinnedCameraOverlay({
+  camera,
+  allCameras,
+  onSwitchCamera,
+  onClose,
+  onExpand,
+}: {
+  camera: CameraInfo;
+  allCameras: CameraInfo[];
+  onSwitchCamera: (cam: CameraInfo) => void;
+  onClose: () => void;
+  onExpand: () => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [showMenu, setShowMenu] = useState(false);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    let isMounted = true;
+    const mediaStream = new MediaStream();
+    const pc = new RTCPeerConnection({ iceServers: [] });
+
+    pc.addTransceiver("video", { direction: "recvonly" });
+    pc.addTransceiver("audio", { direction: "recvonly" });
+
+    pc.ontrack = (event) => {
+      mediaStream.addTrack(event.track);
+      if (video && isMounted) {
+        video.srcObject = mediaStream;
+        video.muted = true;
+        video.play().catch(() => {});
+      }
+    };
+
+    let streamId = "";
+    async function init() {
+      try {
+        const startRes = await fetch(getApiUrl("/api/stream/start"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: camera.url, tuner_type: "rtsp", quality: "720p_std" }),
+        });
+        const startData = await startRes.json();
+        streamId = startData.id;
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        let connected = false;
+        let attempts = 0;
+        while (!connected && attempts < 20 && isMounted) {
+          attempts++;
+          try {
+            const res = await fetch(`http://${window.location.hostname}:8889/${streamId}/whep`, {
+              method: "POST",
+              headers: { "Content-Type": "application/sdp" },
+              body: offer.sdp,
+            });
+            if (res.ok) {
+              const answerSdp = await res.text();
+              await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: answerSdp }));
+              connected = true;
+              break;
+            }
+          } catch {}
+          await new Promise((r) => setTimeout(r, 300));
+        }
+      } catch (err) {
+        console.warn("[PinnedCamera] Connection error:", err);
+      }
+    }
+
+    init();
+
+    return () => {
+      isMounted = false;
+      pc.close();
+      if (streamId) {
+        fetch(getApiUrl(`/api/stream/stop/${streamId}`), { method: "DELETE" }).catch(() => {});
+      }
+    };
+  }, [camera]);
+
+  return (
+    <div
+      className="absolute top-16 right-4 sm:top-20 sm:right-8 z-30 w-52 sm:w-72 aspect-video rounded-xl overflow-hidden shadow-2xl border-2 border-blue-500/80 bg-black group/pin select-none transition-all"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <video ref={videoRef} className="w-full h-full object-contain bg-black pointer-events-none" autoPlay playsInline muted />
+      
+      {/* Header Bar */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/80 opacity-0 group-hover/pin:opacity-100 transition-opacity p-2 flex flex-col justify-between">
+        <div className="flex items-center justify-between gap-1">
+          <span className="text-[11px] sm:text-xs font-bold text-white truncate drop-shadow">{camera.name}</span>
+          <div className="flex items-center gap-1">
+            {allCameras.length > 1 && (
+              <button onClick={() => setShowMenu(!showMenu)} className="p-1 rounded bg-black/60 hover:bg-neutral-800 text-white" title="Switch Camera">
+                <Video className="w-3.5 h-3.5" />
+              </button>
+            )}
+            <button onClick={onExpand} className="p-1 rounded bg-black/60 hover:bg-neutral-800 text-white" title="Open Full Camera">
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={onClose} className="p-1 rounded bg-black/60 hover:bg-red-900 text-red-400" title="Close Camera PiP">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+        
+        {/* Live Badge */}
+        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-sm self-start">
+          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+          <span className="text-[9px] font-bold text-white tracking-wider">LIVE</span>
+        </div>
+      </div>
+
+      {showMenu && (
+        <div className="absolute inset-0 bg-neutral-950/95 p-2 overflow-y-auto z-40 flex flex-col gap-1">
+          <div className="text-[11px] font-bold text-neutral-400 mb-1">Select Camera</div>
+          {allCameras.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => { onSwitchCamera(c); setShowMenu(false); }}
+              className={`text-left text-xs p-1.5 rounded transition-colors ${c.id === camera.id ? 'bg-blue-600 text-white' : 'text-neutral-300 hover:bg-neutral-800'}`}
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function VideoPlayer() {
   const { channelId } = useParams<{ channelId: string }>();
   const navigate = useNavigate();
@@ -53,6 +199,12 @@ export default function VideoPlayer() {
   const positionRef = useRef(0);
   const streamSessionIdRef = useRef<string | null>(null);
   
+  const { playChannel } = usePlayer();
+  const [pipCamera, setPipCamera] = useState<CameraInfo | null>(null);
+  const [showCameraMenu, setShowCameraMenu] = useState(false);
+  const { data: sources } = useApi<CameraInfo[]>("/api/sources");
+  const rtspCameras = useMemo(() => sources?.filter(s => s.type === "rtsp") || [], [sources]);
+
   const [isPlaying, setIsPlaying] = useState(true);
   const [volume, setVolume] = useState(() => {
     const saved = localStorage.getItem('tvapp_volume');
@@ -76,6 +228,25 @@ export default function VideoPlayer() {
   
   const [showOverlay, setShowOverlay] = useState(true);
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const toggleNativePip = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const video = videoRef.current;
+    if (!video) return;
+
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else if (typeof video.requestPictureInPicture === 'function') {
+        await video.requestPictureInPicture();
+      } else if (typeof (video as any).webkitSetPresentationMode === 'function') {
+        const current = (video as any).webkitPresentationMode;
+        (video as any).webkitSetPresentationMode(current === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
+      }
+    } catch (err) {
+      console.warn("Native PiP error:", err);
+    }
+  }, []);
 
   const handleMouseMove = useCallback(() => {
     setShowOverlay(true);
@@ -134,6 +305,7 @@ export default function VideoPlayer() {
       const ch = allChannels.find(c => c.id === parseInt(channelId));
       if (ch) {
         setChannel(prev => prev?.id === ch.id ? prev : ch);
+        playChannel(ch);
         const mapped = mapCategory(ch.group_title || "", ch.name || "");
         if (CATEGORIES.includes(mapped)) {
           setActiveCategory(prev => prev === mapped ? prev : mapped);
@@ -147,6 +319,7 @@ export default function VideoPlayer() {
     fetchWithCache(getApiUrl(`/api/channels/${channelId}`))
       .then(ch => {
         setChannel(prev => prev?.id === ch.id ? prev : ch);
+        playChannel(ch);
         const mapped = mapCategory(ch.group_title || "", ch.name || "");
         if (CATEGORIES.includes(mapped)) {
           setActiveCategory(prev => prev === mapped ? prev : mapped);
@@ -155,7 +328,7 @@ export default function VideoPlayer() {
         }
       })
       .catch(() => setStatus("Channel not found"));
-  }, [channelId, allChannels]);
+  }, [channelId, allChannels, playChannel]);
 
   useEffect(() => {
     if (!channelId) return;
@@ -444,6 +617,17 @@ export default function VideoPlayer() {
         }}
       />
 
+      {/* Pinned Security Camera PiP Overlay */}
+      {pipCamera && (
+        <PinnedCameraOverlay
+          camera={pipCamera}
+          allCameras={rtspCameras}
+          onSwitchCamera={(c) => setPipCamera(c)}
+          onClose={() => setPipCamera(null)}
+          onExpand={() => navigate(`/cameras/${pipCamera.id}`)}
+        />
+      )}
+
       {/* Status Overlays */}
       {status === "Loading..." || status === "Recovering..." || status === "Starting stream..." ? (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20 bg-black">
@@ -593,6 +777,63 @@ export default function VideoPlayer() {
                   <History className="w-5 h-5 sm:w-6 sm:h-6" />
                 </button>
               )}
+
+              {/* Security Camera PiP Overlay Toggle */}
+              {rtspCameras.length > 0 && (
+                <div className="relative">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (pipCamera) {
+                        setPipCamera(null);
+                        setShowCameraMenu(false);
+                      } else if (rtspCameras.length === 1) {
+                        setPipCamera(rtspCameras[0]);
+                      } else {
+                        setShowCameraMenu(!showCameraMenu);
+                      }
+                    }}
+                    className={`p-1.5 sm:p-2 rounded-full transition-colors flex items-center justify-center focus:outline-none cursor-pointer ${
+                      pipCamera ? "text-blue-400 bg-blue-600/20" : "text-white hover:text-blue-400"
+                    }`}
+                    title={pipCamera ? "Close Camera PiP" : "Camera Picture-in-Picture"}
+                  >
+                    <Video className="w-5 h-5 sm:w-6 sm:h-6" />
+                  </button>
+
+                  {showCameraMenu && !pipCamera && (
+                    <div 
+                      className="absolute bottom-full right-0 mb-3 w-48 bg-neutral-900/95 backdrop-blur-xl border border-neutral-800 rounded-2xl p-2 shadow-2xl z-50 flex flex-col gap-1"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="text-[11px] font-bold text-neutral-400 px-2 py-1 uppercase tracking-wider">
+                        Pin Camera
+                      </div>
+                      {rtspCameras.map((cam) => (
+                        <button
+                          key={cam.id}
+                          onClick={() => {
+                            setPipCamera(cam);
+                            setShowCameraMenu(false);
+                          }}
+                          className="w-full text-left px-2.5 py-1.5 text-xs text-neutral-200 hover:bg-blue-600 hover:text-white rounded-lg transition-colors truncate"
+                        >
+                          {cam.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Native OS Picture in Picture */}
+              <button
+                onClick={toggleNativePip}
+                className="p-1.5 sm:p-2 text-white hover:text-blue-400 rounded-full transition-colors flex items-center justify-center focus:outline-none cursor-pointer"
+                title="Picture in Picture"
+              >
+                <PictureInPicture2 className="w-5 h-5 sm:w-6 sm:h-6" />
+              </button>
 
               {/* More Channels integrated into controls */}
               <button 
