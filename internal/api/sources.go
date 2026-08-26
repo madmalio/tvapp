@@ -136,6 +136,41 @@ func updateSourceHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(s)
 }
 
+func refreshSourceHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	s, err := db.GetSource(id)
+	if err != nil {
+		http.Error(w, "source not found", http.StatusNotFound)
+		return
+	}
+
+	go parseSource(*s)
+	w.WriteHeader(http.StatusOK)
+}
+
+func refreshAllSourcesHandler(w http.ResponseWriter, r *http.Request) {
+	sources, err := db.GetSources()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	go func() {
+		for _, s := range sources {
+			if s.Type != "rtsp" {
+				parseSource(s)
+			}
+		}
+	}()
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func deleteSourceHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))
 	if err != nil {

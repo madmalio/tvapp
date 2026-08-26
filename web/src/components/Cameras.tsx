@@ -1,8 +1,19 @@
-import Hls from "hls.js";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { getApiUrl } from "../lib/api";
 import { useApi } from "../hooks/useApi";
-import { Video, RefreshCw } from "lucide-react";
+import { 
+  ArrowLeft, 
+  Menu, 
+  X, 
+  Maximize, 
+  Minimize, 
+  Video, 
+  Volume2, 
+  VolumeX,
+  Play,
+  Pause
+} from "lucide-react";
 
 type SourceRow = {
   id: number;
@@ -12,289 +23,642 @@ type SourceRow = {
   epg_url?: string;
 };
 
-function sanitizePathName(name: string) {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '');
+// =========================================================
+// Global In-Memory Camera Stream Cache for 0ms transitions
+// =========================================================
+type CachedStream = {
+  mediaStream: MediaStream;
+  pc: RTCPeerConnection;
+  streamId: string;
+  sessionId: string;
+  subscribers: Set<string>;
+  cleanupTimer?: ReturnType<typeof setTimeout>;
+};
+
+const cameraStreamCache = new Map<number, CachedStream>();
+
+// Global heartbeat for all active camera streams
+if (typeof window !== "undefined") {
+  setInterval(() => {
+    cameraStreamCache.forEach((entry) => {
+      if (entry.streamId && entry.subscribers.size > 0) {
+        fetch(getApiUrl(`/api/stream/heartbeat/${entry.streamId}`)).catch(() => {});
+      }
+    });
+  }, 25000);
 }
 
-import Hls from "hls.js";
-import { useEffect, useRef, useState } from "react";
-import { getApiUrl } from "../lib/api";
+function getActiveStream(sourceId: number): CachedStream | undefined {
+  const entry = cameraStreamCache.get(sourceId);
+  if (entry && entry.pc.connectionState !== "closed" && entry.pc.connectionState !== "failed") {
+    return entry;
+  }
+  return undefined;
+}
 
-function CameraPlayer({ source }: { source: SourceRow }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [streamId, setStreamId] = useState<string | null>(null);
-  const [retryCount, setRetryCount] = useState(0);
-  const [iframeKey, setIframeKey] = useState(0);
-  const [isReady, setIsReady] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const sessionIdRef = useRef<string | null>(null);
-  const hlsRef = useRef<any>(null);
-
-  const [useWebRTC, setUseWebRTC] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(`tvapp_cam_${source.id}_webrtc`) === "true";
-    } catch (e) {
-      return false;
+async function acquireCameraStream(
+  source: SourceRow,
+  subscriberId: string,
+  onStreamReady: (stream: MediaStream) => void
+): Promise<CachedStream> {
+  let entry = getActiveStream(source.id);
+  if (entry) {
+    if (entry.cleanupTimer) {
+      clearTimeout(entry.cleanupTimer);
+      entry.cleanupTimer = undefined;
     }
+    entry.subscribers.add(subscriberId);
+    onStreamReady(entry.mediaStream);
+    return entry;
+  }
+
+  const mediaStream = new MediaStream();
+  const pc = new RTCPeerConnection({ iceServers: [] });
+  pc.addTransceiver("video", { direction: "recvonly" });
+  pc.addTransceiver("audio", { direction: "recvonly" });
+
+  pc.ontrack = (event) => {
+    mediaStream.addTrack(event.track);
+    onStreamReady(mediaStream);
+  };
+
+  // Start stream on backend
+  const startRes = await fetch(getApiUrl("/api/stream/start"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: source.url, tuner_type: "rtsp", quality: "720p_std" }),
+  });
+  const startData = await startRes.json();
+  const streamId = startData.id;
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  entry = {
+    mediaStream,
+    pc,
+    streamId,
+    sessionId: streamId,
+    subscribers: new Set([subscriberId]),
+  };
+  cameraStreamCache.set(source.id, entry);
+
+  // WHEP handshake retry loop
+  let connected = false;
+  let attempts = 0;
+  while (!connected && attempts < 25) {
+    attempts++;
+    try {
+      const res = await fetch(`http://${window.location.hostname}:8889/${streamId}/whep`, {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: offer.sdp,
+      });
+      if (res.ok) {
+        const answerSdp = await res.text();
+        await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: answerSdp }));
+        connected = true;
+        break;
+      }
+    } catch (e) {
+      // retry
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+
+  return entry;
+}
+
+function releaseCameraStream(sourceId: number, subscriberId: string) {
+  const entry = cameraStreamCache.get(sourceId);
+  if (!entry) return;
+  entry.subscribers.delete(subscriberId);
+
+  if (entry.subscribers.size === 0) {
+    if (entry.cleanupTimer) clearTimeout(entry.cleanupTimer);
+    // Keep stream in memory for 15 seconds to allow fast re-entry
+    entry.cleanupTimer = setTimeout(() => {
+      const current = cameraStreamCache.get(sourceId);
+      if (current && current.subscribers.size === 0) {
+        current.pc.close();
+        fetch(getApiUrl(`/api/stream/stop/${current.sessionId}`), { method: "DELETE" }).catch(() => {});
+        cameraStreamCache.delete(sourceId);
+      }
+    }, 15000);
+  }
+}
+
+// =========================================================
+// Focused Camera Player (Exact match to VideoPlayer.tsx UI)
+// =========================================================
+function CameraPlayerView({
+  camera,
+  allCameras,
+  onSelectCamera,
+  onClose,
+}: {
+  camera: SourceRow;
+  allCameras: SourceRow[];
+  onSelectCamera: (cam: SourceRow) => void;
+  onClose: () => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [status, setStatus] = useState("Loading...");
+  const [isPlaying, setIsPlaying] = useState(true);
+
+  const [volume, setVolume] = useState(() => {
+    const saved = localStorage.getItem("tvapp_camera_volume");
+    return saved !== null ? parseFloat(saved) : 1;
+  });
+  const [isMuted, setIsMuted] = useState(() => {
+    const saved = localStorage.getItem("tvapp_camera_muted");
+    return saved !== null ? saved === "true" : true; // default cameras to muted if not set
   });
 
-  const toggleMode = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const newVal = !useWebRTC;
-    
-    setUseWebRTC(newVal);
-    try {
-      localStorage.setItem(`tvapp_cam_${source.id}_webrtc`, newVal.toString());
-    } catch(e) {}
-  };
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const toggleExpand = () => {
-    if (isExpanded && useWebRTC) {
-      setIframeKey(k => k + 1);
-    }
-    setIsExpanded(!isExpanded);
-  };
+  // Sync volume and mute directly with the HTML5 video element
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.volume = volume;
+    video.muted = isMuted;
+    localStorage.setItem("tvapp_camera_volume", volume.toString());
+    localStorage.setItem("tvapp_camera_muted", isMuted.toString());
+  }, [volume, isMuted]);
+
+  const handleMouseMove = useCallback(() => {
+    setShowOverlay(true);
+    if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+    overlayTimerRef.current = setTimeout(() => {
+      setShowOverlay(false);
+    }, 4000);
+  }, []);
 
   useEffect(() => {
-    let active = true;
-    setStreamId(null);
-    setIsReady(false);
-    fetch(getApiUrl("/api/stream/start"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: source.url, tuner_type: "rtsp", quality: "720p_std" })
-    })
-    .then(r => r.json())
-    .then(data => {
-      if (!active) {
-        fetch(getApiUrl(`/api/stream/stop/${data.id}`), { method: "DELETE" }).catch(() => {});
-        return;
-      }
-      sessionIdRef.current = data.id;
-      setStreamId(data.id);
-    })
-    .catch(err => setError(err.message));
-
+    handleMouseMove();
     return () => {
-      active = false;
-      if (sessionIdRef.current) {
-        fetch(getApiUrl(`/api/stream/stop/${sessionIdRef.current}`), { method: "DELETE" }).catch(() => {});
-        sessionIdRef.current = null;
-      }
+      if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
     };
-  }, [source, retryCount]);
+  }, [handleMouseMove, camera]);
 
-  // Wait until the stream is ACTUALLY published in MediaMTX before hiding the loader
+  const togglePlay = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      video.play().catch(console.error);
+      setIsPlaying(true);
+    } else {
+      video.pause();
+      setIsPlaying(false);
+    }
+  }, []);
+
+  const toggleFullscreen = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const container = containerRef.current;
+    if (!container) return;
+
+    if (!document.fullscreenElement) {
+      container.requestFullscreen().catch(console.error);
+    } else {
+      document.exitFullscreen().catch(console.error);
+    }
+  }, []);
+
   useEffect(() => {
-    if (!streamId || error) return;
-    
-    let isMounted = true;
-        let attempts = 0;
-    const checkReady = () => {
-      attempts++;
-      if (attempts > 30) {
-        if (isMounted) {
-          setError("Stream failed to start (timed out)");
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  // Keyboard navigation matching VideoPlayer.tsx (ArrowUp / ArrowDown for switching)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        e.preventDefault();
+        if (allCameras.length === 0) return;
+        const currentIndex = allCameras.findIndex((c) => c.id === camera.id);
+        if (currentIndex === -1) return;
+
+        let newIndex = currentIndex;
+        if (e.key === "ArrowUp") {
+          newIndex = currentIndex < allCameras.length - 1 ? currentIndex + 1 : 0;
+        } else if (e.key === "ArrowDown") {
+          newIndex = currentIndex > 0 ? currentIndex - 1 : allCameras.length - 1;
         }
-        return;
+
+        const newCam = allCameras[newIndex];
+        if (newCam) {
+          onSelectCamera(newCam);
+        }
+      } else if (e.key === "Escape" || e.key === "Backspace") {
+        if (drawerOpen) {
+          setDrawerOpen(false);
+        } else {
+          onClose();
+        }
       }
-      fetch(getApiUrl(`/api/stream/hls/${streamId}/index.m3u8`), { method: 'GET' })
-        .then(res => {
-          if (res.ok && isMounted) {
-            setIsReady(true);
-          } else if (isMounted) {
-            setTimeout(checkReady, 1000);
-          }
-        })
-        .catch(() => {
-          if (isMounted) setTimeout(checkReady, 1000);
-        });
     };
-    checkReady();
 
-    return () => { isMounted = false; };
-  }, [streamId, error]);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [camera, allCameras, drawerOpen, onSelectCamera, onClose]);
 
-  // Heartbeat for WebRTC
+  // Acquire or reuse stream from in-memory cache
   useEffect(() => {
-    if (!streamId || !useWebRTC) return;
-    const interval = setInterval(() => {
-      fetch(getApiUrl(`/api/stream/heartbeat/${streamId}`)).catch(() => {});
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [streamId, useWebRTC]);
-
-  useEffect(() => {
-    if (!streamId || useWebRTC) return; // Skip HLS if WebRTC is enabled
     const video = videoRef.current;
     if (!video) return;
 
-    const streamUrl = getApiUrl(`/api/stream/hls/${streamId}/index.m3u8`);
+    const subId = `focus-${camera.id}`;
+    let isMounted = true;
 
-    if (Hls.isSupported()) {
-      const hls = new Hls({
-        liveDurationInfinity: true,
-      });
-      hlsRef.current = hls;
-      hls.loadSource(streamUrl);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) {
-          setError(`Camera offline or stream failed.`);
+    // Check if stream already exists in memory (from grid or cache)
+    const cached = getActiveStream(camera.id);
+    if (cached && cached.mediaStream.getTracks().length > 0) {
+      video.srcObject = cached.mediaStream;
+      video.volume = volume;
+      video.muted = isMuted;
+      video.play().then(() => {
+        if (isMounted) {
+          setStatus("");
+          setIsPlaying(true);
         }
+      }).catch(() => {
+        video.muted = true;
+        video.play().catch(() => {});
+        if (isMounted) setStatus("");
       });
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(e => console.warn("Auto-play prevented", e));
-      });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = streamUrl;
-      video.addEventListener('loadedmetadata', () => {
-        video.play().catch(e => console.warn("Auto-play prevented", e));
-      });
+    } else {
+      setStatus("Loading...");
     }
 
-    return () => {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
+    acquireCameraStream(camera, subId, (stream) => {
+      if (isMounted && video) {
+        video.srcObject = stream;
+        video.volume = volume;
+        video.muted = isMuted;
+        video.play().then(() => {
+          setStatus("");
+          setIsPlaying(true);
+        }).catch(() => {
+          video.muted = true;
+          video.play().catch(() => {});
+          setStatus("");
+        });
       }
+    }).catch((err) => {
+      if (isMounted) setStatus(err.message || "Failed to load stream");
+    });
+
+    return () => {
+      isMounted = false;
+      releaseCameraStream(camera.id, subId);
     };
-  }, [streamId, useWebRTC]);
-
-  const webrtcUrl = streamId ? `http://${window.location.hostname}:8889/${streamId}/` : "";
-
-  const containerClasses = isExpanded 
-    ? "fixed inset-4 z-50 bg-black rounded-xl overflow-hidden shadow-2xl flex flex-col group"
-    : "bg-black rounded-xl overflow-hidden shadow-xl group relative cursor-pointer transition-colors aspect-video";
+  }, [camera]);
 
   return (
-    <>
+    <div
+      ref={containerRef}
+      className="flex-1 flex flex-col bg-black relative overflow-hidden cursor-default group h-screen w-screen"
+      onMouseMove={handleMouseMove}
+      onClick={togglePlay}
+    >
+      {/* Video Display (Native HTML5 video, no iframe, no browser controls popup) */}
+      <video
+        ref={videoRef}
+        className="absolute inset-0 w-full h-full object-contain bg-black z-0"
+        autoPlay
+        playsInline
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onVolumeChange={(e) => {
+          setVolume(e.currentTarget.volume);
+          setIsMuted(e.currentTarget.muted);
+        }}
+      />
+
+      {/* Status Overlays (exact match to VideoPlayer.tsx) */}
+      {status === "Loading..." || status === "Recovering..." || status === "Starting stream..." ? (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20 bg-black">
+          <div className="flex flex-col items-center">
+            <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mb-4" />
+            <p className="text-white font-medium drop-shadow-md">{status}</p>
+          </div>
+        </div>
+      ) : status ? (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+          <p className={`text-white font-medium backdrop-blur-md px-6 py-2 rounded-full shadow-lg transition-all duration-300 ${status.toLowerCase().includes('error') || status.toLowerCase().includes('fail') ? 'bg-red-600/90' : 'bg-neutral-900/80 border border-neutral-700'}`}>
+            {status}
+          </p>
+        </div>
+      ) : null}
+
+      {/* Cinematic Overlays (Auto hides - exact match to VideoPlayer.tsx) */}
       <div 
-        className={containerClasses}
-        onClick={!isExpanded ? toggleExpand : undefined}
+        className={`absolute inset-0 pointer-events-none transition-opacity duration-700 z-10 flex flex-col justify-between ${
+          showOverlay ? "opacity-100" : "opacity-0"
+        }`}
       >
-        <div className="relative w-full h-full flex items-center justify-center">
-          {!isReady && !error ? (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-neutral-500 bg-black">
-              <div className="w-8 h-8 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mb-2" />
-              <span className="text-sm">Connecting...</span>
-            </div>
-          ) : null}
-
-          {error ? (
-            <div 
-              className="flex flex-col items-center text-red-500 gap-2 p-4 text-center z-20 bg-black/90 w-full h-full justify-center absolute inset-0 cursor-pointer hover:bg-neutral-900 transition-colors"
-              onClick={(e) => {
-                e.stopPropagation();
-                setError(null);
-                setIsReady(false);
-                setRetryCount(c => c + 1);
-              }}
-            >
-              <RefreshCw className="w-6 h-6 mb-1" />
-              <span className="text-sm font-medium">{error}</span>
-              <span className="text-xs text-neutral-400">Click to retry</span>
-            </div>
-          ) : useWebRTC && streamId && isReady ? (
-            <>
-              <iframe 
-                key={iframeKey}
-                src={webrtcUrl} 
-                className="w-full h-full border-0 absolute inset-0" 
-                allow="autoplay; fullscreen"
-                allowFullScreen 
-                scrolling="no"
-                title={`Camera ${source.name}`}
-              />
-              {/* Intercept clicks when not expanded so we can expand the iframe */}
-              {!isExpanded && (
-                <div className="absolute inset-0 z-10 cursor-pointer" onClick={toggleExpand} />
-              )}
-            </>
-          ) : streamId && isReady ? (
-            <video
-              ref={videoRef}
-              className="w-full h-full object-contain absolute inset-0 bg-black"
-              controls={isExpanded}
-              muted={!isExpanded}
-              playsInline
-            />
-          ) : null}
-          
-          {/* Subtle overlay label */}
-          <div className="absolute top-3 left-3 px-2 py-1 bg-black/40 backdrop-blur-sm rounded flex items-center gap-2 pointer-events-none z-20">
-            <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-            <span className="text-white/90 text-xs font-medium tracking-wide shadow-sm">{source.name}</span>
-          </div>
-
-          {/* Controls */}
-          <div className="absolute top-3 right-3 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all z-20">
+        <div className="h-48 bg-gradient-to-b from-black/90 via-black/40 to-transparent flex items-start p-6 md:p-8">
+          <div className="pointer-events-auto flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
             <button 
-              onClick={toggleMode}
-              className="px-2 py-1 bg-black/60 hover:bg-black/80 backdrop-blur-sm rounded border border-white/10 text-white/90 text-xs font-medium cursor-pointer"
+              onClick={(e) => { e.stopPropagation(); onClose(); }}
+              className="p-3 bg-neutral-900/50 hover:bg-neutral-800 text-white rounded-full backdrop-blur-sm transition-colors flex items-center justify-center mr-2 shadow-lg cursor-pointer"
+              title="Exit Player"
             >
-              {useWebRTC ? "WebRTC" : "HLS"}
+              <ArrowLeft className="w-6 h-6" />
             </button>
-            {isExpanded && (
+            <div>
+              <h2 className="text-2xl md:text-4xl font-bold text-white tracking-tight drop-shadow-lg">
+                {camera.name}
+              </h2>
+            </div>
+          </div>
+        </div>
+
+        {/* Custom Bottom Controls (exact match to VideoPlayer.tsx) */}
+        <div className="h-48 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex items-end p-6 md:p-8">
+          <div className="w-full flex items-center justify-between pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-4 md:gap-6">
               <button 
-                onClick={toggleExpand}
-                className="w-6 h-6 flex items-center justify-center bg-black/60 hover:bg-black/80 backdrop-blur-sm rounded border border-white/10 text-white/90 cursor-pointer"
+                onClick={togglePlay} 
+                className="text-white hover:text-blue-400 transition-colors focus:outline-none cursor-pointer"
               >
-                &times;
+                {isPlaying ? <Pause className="w-8 h-8 md:w-10 md:h-10 fill-current" /> : <Play className="w-8 h-8 md:w-10 md:h-10 fill-current" />}
               </button>
-            )}
+
+              <div className="flex items-center gap-2 transition-colors">
+                <span className="w-2 h-2 rounded-full bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.8)] animate-pulse"></span>
+                <span className="font-bold text-sm tracking-wider text-white/90">LIVE</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 md:gap-4">
+              {/* Audio Controls */}
+              <div className="hidden md:flex items-center gap-3 group/volume mr-2">
+                <button 
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    const nextMuted = !isMuted;
+                    setIsMuted(nextMuted);
+                    if (videoRef.current) {
+                      videoRef.current.muted = nextMuted;
+                      if (!nextMuted) {
+                        videoRef.current.play().catch(() => {});
+                      }
+                    }
+                  }}
+                  className="text-white hover:text-blue-400 transition-colors focus:outline-none cursor-pointer"
+                  title={isMuted ? "Unmute" : "Mute"}
+                >
+                  {isMuted || volume === 0 ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
+                </button>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="1" 
+                  step="0.05" 
+                  value={isMuted ? 0 : volume}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    const val = parseFloat(e.target.value);
+                    setVolume(val);
+                    if (val > 0) setIsMuted(false);
+                    if (videoRef.current) {
+                      videoRef.current.volume = val;
+                      if (val > 0) videoRef.current.muted = false;
+                    }
+                  }}
+                  style={{
+                    background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(isMuted ? 0 : volume) * 100}%, #525252 ${(isMuted ? 0 : volume) * 100}%, #525252 100%)`
+                  }}
+                  className="w-20 md:w-24 h-1.5 md:h-2 rounded-full appearance-none outline-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 md:[&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-3 md:[&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-md hover:[&::-webkit-slider-thumb]:scale-125 [&::-webkit-slider-thumb]:transition-transform"
+                />
+              </div>
+
+              {/* More Cameras button */}
+              <button 
+                onClick={(e) => { e.stopPropagation(); setDrawerOpen(true); }}
+                className="p-2 text-white hover:text-blue-400 rounded-full transition-colors flex items-center justify-center focus:outline-none cursor-pointer"
+                title="More Cameras"
+              >
+                <Menu className="w-6 h-6" />
+              </button>
+
+              <button 
+                onClick={toggleFullscreen}
+                className="text-white hover:text-blue-400 transition-colors p-2 focus:outline-none cursor-pointer"
+              >
+                {isFullscreen ? <Minimize className="w-7 h-7" /> : <Maximize className="w-7 h-7" />}
+              </button>
+            </div>
           </div>
         </div>
       </div>
-      {isExpanded && (
-        <div 
-          className="fixed inset-0 bg-black/90 z-40 backdrop-blur-sm"
-          onClick={toggleExpand}
-        />
-      )}
-      {isExpanded && <div className="aspect-video hidden md:block" />}
-    </>
-  );
-}
 
-export default function Cameras() {
-  const { data: sources, loading, error } = useApi<SourceRow[]>("/api/sources");
-  const cameras = sources?.filter(s => s.type === 'rtsp') || [];
-
-  return (
-    <div className="flex-1 flex flex-col bg-neutral-950 text-neutral-100 overflow-hidden pl-20 pt-6">
-      <div className="px-8 pb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-3">
-            <Video className="w-8 h-8 text-blue-500" />
-            Security Cameras
-          </h1>
-          <p className="text-neutral-400 mt-2">Live feeds from your local RTSP cameras</p>
+      {/* Slide-out Drawer (exact match to VideoPlayer.tsx) */}
+      <div 
+        className={`absolute inset-y-0 right-0 w-80 md:w-96 bg-neutral-950/95 backdrop-blur-xl border-l border-neutral-800 z-50 transform transition-transform duration-300 ease-in-out flex flex-col ${
+          drawerOpen ? 'translate-x-0' : 'translate-x-full'
+        }`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-6 border-b border-neutral-800/50 flex flex-col shrink-0">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-bold text-xl text-white">Cameras</h3>
+            <button onClick={() => setDrawerOpen(false)} className="p-2 text-neutral-400 hover:text-white rounded-full hover:bg-neutral-800 transition-colors cursor-pointer">
+              <X className="w-6 h-6" />
+            </button>
+          </div>
         </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-8">
-        {loading && <div className="text-neutral-500">Loading cameras...</div>}
-        {error && <div className="text-red-500">Failed to load cameras: {error}</div>}
-        
-        {!loading && !error && cameras.length === 0 && (
-          <div className="max-w-xl bg-neutral-900/50 border border-neutral-800 rounded-2xl p-12 text-center">
-            <Video className="w-12 h-12 text-neutral-600 mx-auto mb-4" />
-            <h3 className="text-xl font-medium text-white mb-2">No Cameras Configured</h3>
-            <p className="text-neutral-400 mb-6">You haven't added any security cameras yet.</p>
-            <p className="text-sm text-neutral-500">Go to Settings &rarr; RTSP Cameras to add your first feed.</p>
-          </div>
-        )}
-
-        {cameras.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 max-w-7xl pb-20">
-            {cameras.map(cam => (
-              <CameraPlayer key={cam.id} source={cam} />
-            ))}
-          </div>
-        )}
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+          {allCameras.map((cam) => (
+            <button 
+              key={cam.id}
+              onClick={() => { onSelectCamera(cam); setDrawerOpen(false); }}
+              className={`w-full flex items-center gap-4 p-3 rounded-xl transition-all duration-200 group hover:bg-neutral-800/80 hover:scale-[1.02] text-left cursor-pointer ${
+                cam.id === camera.id 
+                  ? 'bg-blue-900/20 border border-blue-500/30' 
+                  : 'border border-transparent'
+              }`}
+            >
+              <div className="w-14 h-14 shrink-0 bg-neutral-900 rounded-lg p-1.5 flex items-center justify-center shadow-inner">
+                <Video className="w-6 h-6 text-neutral-400 group-hover:text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className={`font-semibold truncate text-sm ${cam.id === camera.id ? 'text-blue-400' : 'text-neutral-200 group-hover:text-white'}`}>
+                  {cam.name}
+                </p>
+              </div>
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
 }
+
+// =========================================================
+// Cameras Grid Card (Exact match to ChannelList.tsx card)
+// =========================================================
+function CameraCard({
+  source,
+  onSelect,
+}: {
+  source: SourceRow;
+  onSelect: (source: SourceRow) => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const subId = `card-${source.id}`;
+    let isMounted = true;
+
+    // Check if stream already exists
+    const cached = getActiveStream(source.id);
+    if (cached && cached.mediaStream.getTracks().length > 0) {
+      video.srcObject = cached.mediaStream;
+      video.play().catch(() => {});
+    }
+
+    acquireCameraStream(source, subId, (stream) => {
+      if (isMounted && video) {
+        video.srcObject = stream;
+        video.play().catch(() => {});
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      releaseCameraStream(source.id, subId);
+    };
+  }, [source]);
+
+  return (
+    <div
+      tabIndex={0}
+      onClick={() => onSelect(source)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect(source);
+        }
+      }}
+      className="group relative flex-none w-[280px] md:w-[320px] aspect-video bg-neutral-900 rounded-xl overflow-hidden snap-start transition-all duration-300 hover:scale-105 hover:z-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-neutral-950 shadow-lg border-2 border-transparent hover:border-blue-500 hover:shadow-[0_0_20px_rgba(59,130,246,0.6)] cursor-pointer"
+    >
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity z-10" />
+
+      <video
+        ref={videoRef}
+        className="w-full h-full object-contain absolute inset-0 bg-black pointer-events-none"
+        autoPlay
+        playsInline
+        muted
+      />
+
+      {/* Card Overlay Info */}
+      <div className="absolute inset-0 flex flex-col justify-between p-4 z-20 pointer-events-none">
+        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/60 backdrop-blur-sm self-start">
+          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+          <span className="text-[10px] font-bold text-white tracking-wider uppercase">LIVE</span>
+        </div>
+
+        <div>
+          <span className="text-white font-semibold text-base drop-shadow-md truncate block">
+            {source.name}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function Cameras() {
+  const { cameraId } = useParams<{ cameraId?: string }>();
+  const navigate = useNavigate();
+  const { data: sources, loading, error } = useApi<SourceRow[]>("/api/sources");
+  const cameras = sources?.filter((s) => s.type === "rtsp") || [];
+
+  const selectedCamera = cameraId 
+    ? cameras.find((c) => c.id === parseInt(cameraId)) || null 
+    : null;
+
+  return (
+    <>
+      {/* Grid View (kept mounted in background so all camera feeds remain live and instant) */}
+      <div 
+        className={`flex-1 overflow-y-auto overflow-x-hidden relative no-scrollbar pl-24 md:pl-28 pr-8 md:pr-12 pt-8 ${
+          selectedCamera ? 'hidden' : 'block animate-in fade-in duration-300'
+        }`}
+      >
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl md:text-5xl font-extrabold text-white tracking-tight drop-shadow-lg">
+            Security Cameras
+          </h1>
+          <p className="text-neutral-400 mt-2 text-base md:text-lg">
+            Live feeds from your RTSP security cameras
+          </p>
+        </div>
+
+        {loading && (
+          <div className="flex-1 flex items-center justify-center py-20">
+            <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+          </div>
+        )}
+
+        {error && (
+          <div className="text-red-500 py-8">Failed to load cameras: {error}</div>
+        )}
+
+        {!loading && !error && cameras.length === 0 && (
+          <div className="bg-neutral-900/50 backdrop-blur-xl border border-neutral-800 rounded-2xl p-12 max-w-md text-center">
+            <Video className="w-12 h-12 text-neutral-600 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold mb-3 text-white">No Cameras Found</h2>
+            <p className="text-neutral-400 mb-6">
+              You haven't added any security cameras yet. Head over to Settings to add an RTSP camera stream.
+            </p>
+          </div>
+        )}
+
+        {cameras.length > 0 && (
+          <div className="flex flex-wrap gap-6 pb-24">
+            {cameras.map((cam) => (
+              <CameraCard
+                key={cam.id}
+                source={cam}
+                onSelect={(c) => navigate(`/cameras/${c.id}`)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Focus View (Overlaid on top when a camera is selected) */}
+      {selectedCamera && (
+        <div className="fixed inset-0 z-50 bg-black">
+          <CameraPlayerView
+            camera={selectedCamera}
+            allCameras={cameras}
+            onSelectCamera={(cam) => navigate(`/cameras/${cam.id}`)}
+            onClose={() => navigate("/cameras")}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
+

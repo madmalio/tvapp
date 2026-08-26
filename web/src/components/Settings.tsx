@@ -1,10 +1,33 @@
-import { useState, useEffect } from "react";
-import { Server, Settings as SettingsIcon, Video, HardDrive, Sliders, Tv, Radio, Plus, Trash2, Edit2, RefreshCw, GripVertical } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { 
+  Server, 
+  Settings as SettingsIcon, 
+  Video, 
+  HardDrive, 
+  Sliders, 
+  Tv, 
+  Radio, 
+  Plus, 
+  Trash2, 
+  Edit2, 
+  RefreshCw, 
+  GripVertical,
+  CheckCircle2,
+  AlertCircle,
+  X
+} from "lucide-react";
 import { getApiUrl, clearApiCache } from "../lib/api";
 import { useApi } from "../hooks/useApi";
 
 type Tab = 'iptv' | 'server' | 'rtsp' | 'dvr' | 'preferences';
 type Source = { id: number; name: string; type: string; url: string; epg_url: string; };
+
+type Toast = {
+  id: string;
+  type: 'success' | 'error' | 'info' | 'loading';
+  title: string;
+  message?: string;
+};
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<Tab>('iptv');
@@ -12,9 +35,28 @@ export default function Settings() {
   // IPTV Multi-Source State
   const { data: sources, refetch: refetchSources } = useApi<Source[]>('/api/sources');
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
-  const [draggedSourceId, setDraggedSourceId] = useState<string | null>(null);
+  const [refreshingSourceIds, setRefreshingSourceIds] = useState<Set<number>>(new Set());
+  const [isRefreshingAll, setIsRefreshingAll] = useState(false);
+  const [draggedSourceId, setDraggedSourceId] = useState<number | null>(null);
   const [draggableId, setDraggableId] = useState<number | null>(null);
+  
+  // Toasts
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const addToast = useCallback((toast: Omit<Toast, 'id'>, duration = 4000) => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts((prev) => [...prev, { ...toast, id }]);
+    if (duration > 0) {
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, duration);
+    }
+    return id;
+  }, []);
+
+  const removeToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
   
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -58,9 +100,17 @@ export default function Settings() {
         })
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setMessage("Server settings saved.");
+      addToast({
+        type: 'success',
+        title: 'Server Settings Saved',
+        message: `EPG background sync scheduled for ${epgSyncTime} daily.`
+      });
     } catch (err: any) {
-      setMessage(`Error: ${err.message}`);
+      addToast({
+        type: 'error',
+        title: 'Failed to Save Settings',
+        message: err.message
+      });
     } finally {
       setLoading(false);
     }
@@ -81,12 +131,20 @@ export default function Settings() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       
-      setMessage(`Source saved. Background sync started.`);
+      addToast({
+        type: 'success',
+        title: isUpdate ? 'Source Updated' : 'Source Added',
+        message: `${formSource.name || 'Source'} saved. Syncing channels and EPG data in background...`
+      });
       clearApiCache();
       setShowAddModal(false);
       refetchSources();
     } catch (err: any) {
-      setMessage(`Error: ${err.message}`);
+      addToast({
+        type: 'error',
+        title: 'Error Saving Source',
+        message: err.message
+      });
     } finally {
       setLoading(false);
     }
@@ -94,23 +152,113 @@ export default function Settings() {
 
   async function deleteSource(id: number) {
     setLoading(true);
+    const targetSource = sources?.find(s => s.id === id);
     try {
       const res = await fetch(getApiUrl(`/api/sources/${id}`), { method: 'DELETE' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setMessage(`Source deleted.`);
+      addToast({
+        type: 'success',
+        title: 'Source Deleted',
+        message: `${targetSource?.name || 'Source'} and its associated channels have been removed.`
+      });
       clearApiCache();
       setShowDeleteModal(null);
       refetchSources();
     } catch (err: any) {
-      setMessage(`Error: ${err.message}`);
+      addToast({
+        type: 'error',
+        title: 'Error Deleting Source',
+        message: err.message
+      });
     } finally {
       setLoading(false);
     }
   }
 
-  const handleDrop = async (e: React.DragEvent, dropSourceId: string) => {
+  async function refreshSingleSource(src: Source) {
+    setRefreshingSourceIds(prev => new Set(prev).add(src.id));
+    const toastId = addToast({
+      type: 'loading',
+      title: `Refreshing ${src.name}...`,
+      message: 'Fetching latest playlist channels & XMLTV guide data'
+    }, 0);
+
+    try {
+      const res = await fetch(getApiUrl(`/api/sources/${src.id}/refresh`), {
+        method: 'POST',
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      // Allow backend sync to process
+      await new Promise(r => setTimeout(r, 1200));
+
+      removeToast(toastId);
+      addToast({
+        type: 'success',
+        title: `${src.name} Refreshed`,
+        message: 'Channels and guide data synced successfully.'
+      });
+      clearApiCache();
+      refetchSources();
+    } catch (err: any) {
+      removeToast(toastId);
+      addToast({
+        type: 'error',
+        title: `Failed to Refresh ${src.name}`,
+        message: err.message
+      });
+    } finally {
+      setRefreshingSourceIds(prev => {
+        const next = new Set(prev);
+        next.delete(src.id);
+        return next;
+      });
+    }
+  }
+
+  async function refreshAllSources() {
+    setIsRefreshingAll(true);
+    const iptvSources = sources?.filter(s => s.type !== 'rtsp') || [];
+    setRefreshingSourceIds(new Set(iptvSources.map(s => s.id)));
+
+    const toastId = addToast({
+      type: 'loading',
+      title: 'Refreshing All Tuners & Sources...',
+      message: 'Syncing channels and EPG entries for all active providers'
+    }, 0);
+
+    try {
+      const res = await fetch(getApiUrl("/api/sources/refresh-all"), {
+        method: 'POST',
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      await new Promise(r => setTimeout(r, 2000));
+
+      removeToast(toastId);
+      addToast({
+        type: 'success',
+        title: 'All Sources Refreshed',
+        message: `Successfully synced ${iptvSources.length} tuner source${iptvSources.length === 1 ? '' : 's'}.`
+      });
+      clearApiCache();
+      refetchSources();
+    } catch (err: any) {
+      removeToast(toastId);
+      addToast({
+        type: 'error',
+        title: 'Refresh All Failed',
+        message: err.message
+      });
+    } finally {
+      setIsRefreshingAll(false);
+      setRefreshingSourceIds(new Set());
+    }
+  }
+
+  const handleDrop = async (e: React.DragEvent, dropSourceId: number) => {
     e.preventDefault();
-    if (!draggedSourceId || draggedSourceId === dropSourceId || !sources) return;
+    if (draggedSourceId === null || draggedSourceId === dropSourceId || !sources) return;
 
     const newSources = [...sources];
     const dragIdx = newSources.findIndex(s => s.id === draggedSourceId);
@@ -133,9 +281,17 @@ export default function Settings() {
       
       clearApiCache();
       refetchSources();
-      setMessage("Source order saved.");
+      addToast({
+        type: 'success',
+        title: 'Source Order Updated',
+        message: 'New tab priority order saved.'
+      });
     } catch (err: any) {
-      setMessage(`Error: ${err.message}`);
+      addToast({
+        type: 'error',
+        title: 'Error Saving Order',
+        message: err.message
+      });
     } finally {
       setLoading(false);
       setDraggedSourceId(null);
@@ -171,7 +327,7 @@ export default function Settings() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as Tab)}
-              className={`pb-4 flex items-center gap-2 text-sm font-medium transition-colors border-b-2 ${
+              className={`pb-4 flex items-center gap-2 text-sm font-medium transition-colors border-b-2 cursor-pointer ${
                 isActive 
                   ? 'border-blue-500 text-blue-400' 
                   : 'border-transparent text-neutral-400 hover:text-neutral-200 hover:border-neutral-700'
@@ -193,30 +349,36 @@ export default function Settings() {
             const rtspSources = sources?.filter(s => s.type === 'rtsp') || [];
             return (
               <>
-          {/* Notification Toast */}
-          {message && (
-            <div className="bg-blue-900/20 border border-blue-500/30 text-blue-300 rounded-xl px-4 py-3 text-sm flex items-center shadow-lg shadow-blue-900/10">
-              <span className="relative flex h-3 w-3 mr-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
-              </span>
-              {message}
-            </div>
-          )}
 
           {/* IPTV Tab */}
           {activeTab === 'iptv' && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
               
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-semibold text-white">Configured Sources</h3>
-                <button
-                  onClick={() => { setFormSource({ type: 'iptv' }); setShowAddModal(true); }}
-                  className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add Source
-                </button>
+                <div>
+                  <h3 className="text-xl font-semibold text-white">Configured Sources</h3>
+                  <p className="text-sm text-neutral-400 mt-1">Manage M3U playlists and HDHomeRun network tuners</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  {iptvSources.length > 0 && (
+                    <button
+                      onClick={refreshAllSources}
+                      disabled={isRefreshingAll}
+                      className="bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 text-neutral-200 hover:text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2 transition-all border border-neutral-700 hover:border-neutral-600 shadow-lg cursor-pointer"
+                      title="Refresh all playlists and guide data"
+                    >
+                      <RefreshCw className={`w-4 h-4 text-blue-400 ${isRefreshingAll ? 'animate-spin' : ''}`} />
+                      {isRefreshingAll ? 'Refreshing All...' : 'Refresh All'}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { setFormSource({ type: 'iptv' }); setShowAddModal(true); }}
+                    className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Source
+                  </button>
+                </div>
               </div>
 
               {iptvSources.length === 0 ? (
@@ -226,79 +388,82 @@ export default function Settings() {
                 </div>
               ) : (
                 <div className="grid gap-4">
-                  {iptvSources.map((src, idx) => (
-                    <div 
-                      key={src.id} 
-                      draggable={draggableId === src.id}
-                      onDragStart={(e) => {
-                        setDraggedSourceId(src.id!);
-                        e.dataTransfer.effectAllowed = "move";
-                      }}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        e.dataTransfer.dropEffect = "move";
-                      }}
-                      onDrop={(e) => handleDrop(e, src.id!)}
-                      className={`bg-neutral-800/50 backdrop-blur-md rounded-xl p-3 md:p-5 border shadow-xl shadow-black/20 flex items-center justify-between group transition-colors ${draggedSourceId === src.id ? 'border-blue-500 opacity-50' : 'border-neutral-700/50 hover:border-blue-500/30'}`}
-                    >
-                      <div className="flex items-center gap-2 md:gap-4 pointer-events-none">
-                        <div 
-                          className="cursor-move p-1 md:p-2 text-neutral-600 hover:text-white transition-colors pointer-events-auto"
-                          onMouseEnter={() => setDraggableId(src.id)}
-                          onMouseLeave={() => setDraggableId(null)}
-                        >
-                          <GripVertical className="w-5 h-5" />
+                  {iptvSources.map((src) => {
+                    const isRefreshing = refreshingSourceIds.has(src.id);
+                    return (
+                      <div 
+                        key={src.id} 
+                        draggable={draggableId === src.id}
+                        onDragStart={(e) => {
+                          setDraggedSourceId(src.id!);
+                          e.dataTransfer.effectAllowed = "move";
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                        }}
+                        onDrop={(e) => handleDrop(e, src.id!)}
+                        className={`bg-neutral-800/50 backdrop-blur-md rounded-xl p-3 md:p-5 border shadow-xl shadow-black/20 flex items-center justify-between group transition-colors ${
+                          draggedSourceId === src.id ? 'border-blue-500 opacity-50' : 'border-neutral-700/50 hover:border-blue-500/30'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 md:gap-4 pointer-events-none">
+                          <div 
+                            className="cursor-move p-1 md:p-2 text-neutral-600 hover:text-white transition-colors pointer-events-auto"
+                            onMouseEnter={() => setDraggableId(src.id)}
+                            onMouseLeave={() => setDraggableId(null)}
+                          >
+                            <GripVertical className="w-5 h-5" />
+                          </div>
+                          <div className={`p-2 md:p-3 rounded-lg ${src.type === 'hdhomerun' ? 'bg-green-500/10 text-green-400' : 'bg-purple-500/10 text-purple-400'}`}>
+                            {src.type === 'hdhomerun' ? <Server className="w-6 h-6" /> : <Radio className="w-6 h-6" />}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-3">
+                              <h4 className="text-white font-medium text-lg">{src.name}</h4>
+                              {isRefreshing && (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                  <RefreshCw className="w-3 h-3 animate-spin" />
+                                  Syncing...
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-sm text-neutral-400 truncate max-w-md">{src.url}</p>
+                            {src.epg_url && <p className="text-xs text-neutral-500 truncate max-w-md mt-0.5">EPG: {src.epg_url}</p>}
+                          </div>
                         </div>
-                        <div className={`p-2 md:p-3 rounded-lg ${src.type === 'hdhomerun' ? 'bg-green-500/10 text-green-400' : 'bg-purple-500/10 text-purple-400'}`}>
-                          {src.type === 'hdhomerun' ? <Server className="w-6 h-6" /> : <Radio className="w-6 h-6" />}
-                        </div>
-                        <div>
-                          <h4 className="text-white font-medium text-lg">{src.name}</h4>
-                          <p className="text-sm text-neutral-400 truncate max-w-md">{src.url}</p>
-                          {src.epg_url && <p className="text-xs text-neutral-500 truncate max-w-md mt-0.5">EPG: {src.epg_url}</p>}
+                        
+                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => { setFormSource(src); setShowAddModal(true); }}
+                            className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-700 rounded-lg transition-colors cursor-pointer"
+                            title="Edit"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => refreshSingleSource(src)}
+                            disabled={isRefreshing}
+                            className={`p-2 rounded-lg transition-colors cursor-pointer ${
+                              isRefreshing 
+                                ? 'text-blue-400 bg-blue-900/30' 
+                                : 'text-blue-400 hover:text-blue-300 hover:bg-blue-900/30'
+                            }`}
+                            title="Force Refresh"
+                          >
+                            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-blue-400' : ''}`} />
+                          </button>
+                          <button
+                            onClick={() => setShowDeleteModal(src.id)}
+                            className="p-2 text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors cursor-pointer"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
                       </div>
-                      
-                      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => { setFormSource(src); setShowAddModal(true); }}
-                          className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-700 rounded-lg transition-colors"
-                          title="Edit"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => {
-                            // Call api directly to avoid async state issues
-                            setLoading(true);
-                            fetch(getApiUrl(`/api/sources/${src.id}`), {
-                              method: 'PUT',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify(src)
-                            }).then(res => {
-                              if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                              setMessage(`Source refreshed.`);
-                              clearApiCache();
-                              refetchSources();
-                            }).catch(err => {
-                              setMessage(`Error: ${err.message}`);
-                            }).finally(() => setLoading(false));
-                          }}
-                          className="p-2 text-blue-400 hover:text-blue-300 hover:bg-blue-900/30 rounded-lg transition-colors"
-                          title="Force Refresh"
-                        >
-                          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                        </button>
-                        <button
-                          onClick={() => setShowDeleteModal(src.id)}
-                          className="p-2 text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -354,7 +519,7 @@ export default function Settings() {
                   <button 
                     onClick={saveServerSettings}
                     disabled={loading}
-                    className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-6 py-2.5 rounded-lg transition-all"
+                    className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-6 py-2.5 rounded-lg transition-all cursor-pointer"
                   >
                     {loading ? "Saving..." : "Save Changes"}
                   </button>
@@ -368,10 +533,13 @@ export default function Settings() {
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
               
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-semibold text-white">Security Cameras</h3>
+                <div>
+                  <h3 className="text-xl font-semibold text-white">Security Cameras</h3>
+                  <p className="text-sm text-neutral-400 mt-1">Manage live RTSP camera feeds and streams</p>
+                </div>
                 <button
                   onClick={() => { setFormSource({ type: 'rtsp' }); setShowAddModal(true); }}
-                  className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20"
+                  className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
                   Add Camera
@@ -398,7 +566,9 @@ export default function Settings() {
                         e.dataTransfer.dropEffect = "move";
                       }}
                       onDrop={(e) => handleDrop(e, src.id!)}
-                      className={`bg-neutral-800/50 backdrop-blur-md rounded-xl p-3 md:p-5 border shadow-xl shadow-black/20 flex items-center justify-between group transition-colors ${draggedSourceId === src.id ? 'border-blue-500 opacity-50' : 'border-neutral-700/50 hover:border-blue-500/30'}`}
+                      className={`bg-neutral-800/50 backdrop-blur-md rounded-xl p-3 md:p-5 border shadow-xl shadow-black/20 flex items-center justify-between group transition-colors ${
+                        draggedSourceId === src.id ? 'border-blue-500 opacity-50' : 'border-neutral-700/50 hover:border-blue-500/30'
+                      }`}
                     >
                       <div className="flex items-center gap-2 md:gap-4 pointer-events-none">
                         <div 
@@ -420,13 +590,15 @@ export default function Settings() {
                       <div className="flex items-center gap-2">
                         <button 
                           onClick={() => { setFormSource(src); setShowAddModal(true); }}
-                          className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-700 rounded-lg transition-colors"
+                          className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-700 rounded-lg transition-colors cursor-pointer"
+                          title="Edit"
                         >
                           <SettingsIcon className="w-5 h-5" />
                         </button>
                         <button 
                           onClick={() => setShowDeleteModal(src.id!)}
-                          className="p-2 text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors"
+                          className="p-2 text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors cursor-pointer"
+                          title="Delete"
                         >
                           <Trash2 className="w-5 h-5" />
                         </button>
@@ -449,30 +621,35 @@ export default function Settings() {
                 
                 <div className="space-y-5">
                   <div>
-                    <label className="block text-sm font-medium text-neutral-400 mb-1.5">Storage Path</label>
+                    <label className="block text-sm font-medium text-neutral-400 mb-1.5">Recordings Directory</label>
                     <input
                       type="text"
                       value={dvrPath}
                       onChange={(e) => setDvrPath(e.target.value)}
-                      placeholder="/mnt/dvr"
+                      placeholder="e.g. /var/media/recordings or D:\TVRecordings"
                       className="w-full bg-neutral-900/80 border border-neutral-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
                     />
+                    <p className="text-xs text-neutral-500 mt-2">Destination folder for scheduled and manual program captures.</p>
                   </div>
                   
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-neutral-400 mb-1.5">Pre-padding (Minutes)</label>
+                      <label className="block text-sm font-medium text-neutral-400 mb-1.5">Pre-Padding (Minutes)</label>
                       <input
                         type="number"
+                        min="0"
+                        max="30"
                         value={prePadding}
                         onChange={(e) => setPrePadding(e.target.value)}
                         className="w-full bg-neutral-900/80 border border-neutral-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-neutral-400 mb-1.5">Post-padding (Minutes)</label>
+                      <label className="block text-sm font-medium text-neutral-400 mb-1.5">Post-Padding (Minutes)</label>
                       <input
                         type="number"
+                        min="0"
+                        max="60"
                         value={postPadding}
                         onChange={(e) => setPostPadding(e.target.value)}
                         className="w-full bg-neutral-900/80 border border-neutral-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
@@ -482,7 +659,7 @@ export default function Settings() {
                 </div>
                 
                 <div className="mt-6 pt-6 border-t border-neutral-700/50 flex justify-end">
-                  <button className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-6 py-2.5 rounded-lg transition-all">
+                  <button className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-6 py-2.5 rounded-lg transition-all cursor-pointer">
                     Save Changes
                   </button>
                 </div>
@@ -494,7 +671,7 @@ export default function Settings() {
           {activeTab === 'preferences' && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
               <div className="bg-neutral-800/50 backdrop-blur-md rounded-2xl p-6 border border-neutral-700/50 shadow-xl shadow-black/20">
-                <h3 className="text-lg font-medium text-white mb-4">Client Preferences</h3>
+                <h3 className="text-lg font-medium text-white mb-4">Application Behavior</h3>
                 
                 <div className="space-y-5">
                   <div>
@@ -502,7 +679,7 @@ export default function Settings() {
                     <select
                       value={defaultLaunch}
                       onChange={(e) => setDefaultLaunch(e.target.value)}
-                      className="w-full bg-neutral-900/80 border border-neutral-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 appearance-none"
+                      className="w-full bg-neutral-900/80 border border-neutral-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 appearance-none cursor-pointer"
                     >
                       <option value="guide">EPG Guide</option>
                       <option value="channels">Channel List</option>
@@ -518,14 +695,17 @@ export default function Settings() {
                       max="100"
                       value={defaultVolume}
                       onChange={(e) => setDefaultVolume(e.target.value)}
-                      className="w-full accent-blue-500"
+                      style={{
+                        background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${defaultVolume}%, #525252 ${defaultVolume}%, #525252 100%)`
+                      }}
+                      className="w-full h-2 rounded-full appearance-none outline-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-md hover:[&::-webkit-slider-thumb]:scale-125 [&::-webkit-slider-thumb]:transition-transform"
                     />
                     <div className="text-right text-xs text-neutral-400 mt-1">{defaultVolume}%</div>
                   </div>
                 </div>
                 
                 <div className="mt-6 pt-6 border-t border-neutral-700/50 flex justify-end">
-                  <button className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-6 py-2.5 rounded-lg transition-all">
+                  <button className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-6 py-2.5 rounded-lg transition-all cursor-pointer">
                     Save Changes
                   </button>
                 </div>
@@ -543,7 +723,11 @@ export default function Settings() {
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 max-w-md w-full shadow-2xl">
-            <h2 className="text-xl font-semibold text-white mb-4">{formSource.id ? 'Edit Source' : 'Add Source'}</h2>
+            <h2 className="text-xl font-semibold text-white mb-4">
+              {formSource.id 
+                ? (formSource.type === 'rtsp' ? 'Edit Security Camera' : 'Edit Source') 
+                : (formSource.type === 'rtsp' ? 'Add Security Camera' : 'Add Tuner Source')}
+            </h2>
             
             <form onSubmit={saveSource} className="space-y-4">
               {formSource.type !== 'rtsp' && (
@@ -602,14 +786,14 @@ export default function Settings() {
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 text-sm font-medium text-neutral-400 hover:text-white transition-colors"
+                  className="px-4 py-2 text-sm font-medium text-neutral-400 hover:text-white transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={loading}
-                  className="bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-700 disabled:text-neutral-500 text-white text-sm font-medium px-6 py-2 rounded-lg transition-all"
+                  className="bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-700 disabled:text-neutral-500 text-white text-sm font-medium px-6 py-2 rounded-lg transition-all cursor-pointer"
                 >
                   {loading ? "Saving..." : formSource.type === "rtsp" ? "Save Camera" : "Save Source"}
                 </button>
@@ -632,14 +816,14 @@ export default function Settings() {
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setShowDeleteModal(null)}
-                className="px-4 py-2 text-sm font-medium text-neutral-400 hover:text-white transition-colors"
+                className="px-4 py-2 text-sm font-medium text-neutral-400 hover:text-white transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={() => deleteSource(showDeleteModal)}
                 disabled={loading}
-                className="bg-red-600 hover:bg-red-500 disabled:bg-neutral-700 disabled:text-neutral-500 text-white text-sm font-medium px-6 py-2 rounded-lg transition-all"
+                className="bg-red-600 hover:bg-red-500 disabled:bg-neutral-700 disabled:text-neutral-500 text-white text-sm font-medium px-6 py-2 rounded-lg transition-all cursor-pointer"
               >
                 {loading ? 'Deleting...' : 'Delete'}
               </button>
@@ -647,6 +831,41 @@ export default function Settings() {
           </div>
         </div>
       )}
+
+      {/* Floating Toast Notification Container */}
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-3 max-w-sm w-full pointer-events-none">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className={`pointer-events-auto flex items-start gap-3 p-4 rounded-xl shadow-2xl backdrop-blur-xl border transition-all duration-300 animate-in slide-in-from-bottom-5 fade-in ${
+              t.type === 'success'
+                ? 'bg-neutral-900/95 border-emerald-500/40 text-emerald-300 shadow-emerald-950/20'
+                : t.type === 'error'
+                ? 'bg-neutral-900/95 border-red-500/40 text-red-300 shadow-red-950/20'
+                : t.type === 'loading'
+                ? 'bg-neutral-900/95 border-blue-500/40 text-blue-300 shadow-blue-950/20'
+                : 'bg-neutral-900/95 border-neutral-700 text-neutral-200'
+            }`}
+          >
+            <div className="mt-0.5 shrink-0">
+              {t.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-400" />}
+              {t.type === 'error' && <AlertCircle className="w-5 h-5 text-red-400" />}
+              {t.type === 'loading' && <RefreshCw className="w-5 h-5 text-blue-400 animate-spin" />}
+              {t.type === 'info' && <Tv className="w-5 h-5 text-blue-400" />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm text-white">{t.title}</p>
+              {t.message && <p className="text-xs text-neutral-400 mt-0.5 break-words">{t.message}</p>}
+            </div>
+            <button
+              onClick={() => removeToast(t.id)}
+              className="text-neutral-400 hover:text-white p-1 -mr-1 -mt-1 rounded-lg hover:bg-neutral-800 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ))}
+      </div>
 
     </div>
   );

@@ -30,6 +30,8 @@ type Session struct {
 	ready     chan struct{}
 	stopCh    chan struct{}
 	stopped   bool
+	refCount  int
+	stopTimer *time.Timer
 }
 
 var (
@@ -79,6 +81,31 @@ func ffmpegHeaders(rawURL string) string {
 }
 
 func Start(rawURL string, tunerType string, quality string) (*Session, error) {
+	// Check for an active session with the same rawURL, tunerType, and quality
+	var existingSess *Session
+	sessions.Range(func(key, value interface{}) bool {
+		s := value.(*Session)
+		s.mu.Lock()
+		match := s.RawURL == rawURL && s.TunerType == tunerType && s.Quality == quality && !s.stopped
+		if match {
+			if s.stopTimer != nil {
+				s.stopTimer.Stop()
+				s.stopTimer = nil
+				log.Printf("[stream] cancelled pending stop for %s", s.ID)
+			}
+			s.refCount++
+			s.LastUsed = time.Now()
+			existingSess = s
+		}
+		s.mu.Unlock()
+		return !match
+	})
+
+	if existingSess != nil {
+		log.Printf("[stream] reusing existing session %s (refCount=%d) for %s", existingSess.ID, existingSess.refCount, rawURL)
+		return existingSess, nil
+	}
+
 	id := fmt.Sprintf("stream_%d", time.Now().UnixNano())
 	dir := filepath.Join(os.TempDir(), "tvapp", id)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -103,6 +130,7 @@ func Start(rawURL string, tunerType string, quality string) (*Session, error) {
 		LastUsed:  time.Now(),
 		ready:     make(chan struct{}),
 		stopCh:    make(chan struct{}),
+		refCount:  1,
 	}
 
 	sessions.Store(id, sess)
@@ -236,8 +264,8 @@ func (s *Session) runLoop() {
 				"-fflags", "nobuffer",
 				"-flags", "low_delay",
 				"-err_detect", "ignore_err",
-				"-analyzeduration", "5000000",
-				"-probesize", "5000000",
+				"-analyzeduration", "1000000",
+				"-probesize", "1000000",
 				"-use_wallclock_as_timestamps", "1",
 				"-i", streamURL,
 				"-sn",
@@ -372,17 +400,44 @@ func GetSession(id string) *Session {
 }
 
 func Stop(id string) {
-	v, ok := sessions.LoadAndDelete(id)
+	v, ok := sessions.Load(id)
 	if !ok {
 		return
 	}
 	s := v.(*Session)
 	s.mu.Lock()
-	s.stopped = true
+	s.refCount--
+	if s.refCount > 0 {
+		s.LastUsed = time.Now()
+		s.mu.Unlock()
+		log.Printf("[stream] stop request for %s, remaining refCount=%d", id, s.refCount)
+		return
+	}
+	if s.stopped {
+		s.mu.Unlock()
+		return
+	}
+
+	// Schedule shutdown after a 6-second grace period to allow seamless transitions between views
+	if s.stopTimer != nil {
+		s.stopTimer.Stop()
+	}
+	s.stopTimer = time.AfterFunc(6*time.Second, func() {
+		s.mu.Lock()
+		if s.refCount > 0 || s.stopped {
+			s.mu.Unlock()
+			return
+		}
+		s.stopped = true
+		s.mu.Unlock()
+
+		sessions.Delete(s.ID)
+		close(s.stopCh)
+		os.RemoveAll(s.Dir)
+		log.Printf("[stream] stopped %s after grace period", s.ID)
+	})
 	s.mu.Unlock()
-	close(s.stopCh)
-	os.RemoveAll(s.Dir)
-	log.Printf("[stream] stopped %s", id)
+	log.Printf("[stream] stop scheduled for %s (grace period 6s)", id)
 }
 
 func cleanupLoop() {
@@ -393,8 +448,9 @@ func cleanupLoop() {
 			s := value.(*Session)
 			s.mu.Lock()
 			last := s.LastUsed
+			stopped := s.stopped
 			s.mu.Unlock()
-			if now.Sub(last) > 120*time.Second {
+			if !stopped && now.Sub(last) > 120*time.Second {
 				log.Printf("[stream] cleanup: %s (idle %v)", key.(string), now.Sub(last))
 				Stop(key.(string))
 			}
