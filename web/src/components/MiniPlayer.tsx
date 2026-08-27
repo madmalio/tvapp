@@ -36,71 +36,99 @@ export default function MiniPlayer() {
     const video = videoRef.current;
     if (!video) return;
 
+    let isMounted = true;
     video.volume = volume;
     video.muted = isMuted;
 
-    if (activeChannel.tuner_type === "hdhomerun") {
-      const streamUrl = getApiUrl(`/api/stream/start?url=${encodeURIComponent(activeChannel.stream_url)}&tuner_type=hdhomerun&quality=720p_std`);
-      video.src = streamUrl;
-      video.play().catch(() => {});
-      return;
-    }
+    function startHls(manifestUrl: string) {
+      if (!isMounted || !video) return;
 
-    if (Hls.isSupported()) {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-      }
+      if (Hls.isSupported()) {
+        if (hlsRef.current) {
+          hlsRef.current.destroy();
+        }
 
-      const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: true,
-        backBufferLength: 60,
-        liveSyncDurationCount: 3,
-        liveMaxLatencyDurationCount: 5,
-        xhrSetup: (xhr, url) => {
-          if (!url.startsWith(getApiUrl("/api/proxy")) && !url.startsWith(window.location.origin)) {
-            xhr.open("GET", getProxyUrl(url), true);
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          backBufferLength: 60,
+          liveSyncDurationCount: 3,
+          liveMaxLatencyDurationCount: 15,
+          xhrSetup: (xhr, url) => {
+            if (!url.startsWith(getApiUrl("/api/proxy")) && !url.startsWith(window.location.origin) && !url.includes("/api/stream/hls/")) {
+              xhr.open("GET", getProxyUrl(url), true);
+            }
+          },
+        });
+
+        hlsRef.current = hls;
+        hls.loadSource(manifestUrl);
+        hls.attachMedia(video);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (isMounted) {
+            video.play().catch(() => {});
           }
-        },
-      });
+        });
 
-      hlsRef.current = hls;
-      const initialProxyUrl = getProxyUrl(activeChannel.stream_url);
-      hls.loadSource(initialProxyUrl);
-      hls.attachMedia(video);
-
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        if (isPlaying) {
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                hls.recoverMediaError();
+                break;
+              default:
+                hls.destroy();
+                break;
+            }
+          }
+        });
+      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = manifestUrl;
+        if (isMounted) {
           video.play().catch(() => {});
         }
-      });
-
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) {
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              hls.startLoad();
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              hls.recoverMediaError();
-              break;
-            default:
-              hls.destroy();
-              break;
-          }
-        }
-      });
-    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = getProxyUrl(activeChannel.stream_url);
-      if (isPlaying) {
-        video.play().catch(() => {});
       }
+    }
+
+    if (activeChannel.tuner_type === "hdhomerun") {
+      fetch(getApiUrl("/api/stream/start"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: activeChannel.stream_url,
+          tuner_type: "hdhomerun",
+          quality: "720p_std",
+        }),
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error(`Start stream error: ${r.status}`);
+          return r.json();
+        })
+        .then((data) => {
+          if (!isMounted) return;
+          sessionIdRef.current = data.id;
+          startHls(getApiUrl(data.manifest_url));
+        })
+        .catch((err) => {
+          console.error("[MiniPlayer] HDHomeRun stream start error:", err);
+        });
+    } else {
+      startHls(getProxyUrl(activeChannel.stream_url));
     }
 
     return () => {
+      isMounted = false;
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
+      }
+      if (sessionIdRef.current) {
+        fetch(getApiUrl(`/api/stream/stop/${sessionIdRef.current}`), { method: "DELETE" }).catch(() => {});
+        sessionIdRef.current = null;
       }
     };
   }, [isMiniPlayerOpen, activeChannel, getProxyUrl]);
@@ -219,7 +247,7 @@ export default function MiniPlayer() {
 
   return (
     <div
-      className="fixed bottom-20 md:bottom-6 right-3 sm:right-6 z-40 w-64 sm:w-80 aspect-video rounded-2xl overflow-hidden shadow-2xl border border-neutral-700/80 bg-neutral-950 group select-none animate-in slide-in-from-bottom-5 fade-in duration-300"
+      className="hidden sm:block fixed bottom-20 md:bottom-6 right-3 sm:right-6 z-40 w-64 sm:w-80 aspect-video rounded-2xl overflow-hidden shadow-2xl border border-neutral-700/80 bg-neutral-950 group select-none animate-in slide-in-from-bottom-5 fade-in duration-300"
       onMouseEnter={() => setShowControls(true)}
       onMouseLeave={() => setShowControls(false)}
       onClick={expandMiniPlayer}

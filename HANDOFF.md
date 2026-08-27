@@ -23,7 +23,11 @@ EPG (Live TV Guide) and Channel List improvements:
 - High-performance React grid (`ChannelList.tsx`) handles thousands of channels smoothly:
   - Memoized `ChannelCarousel` to prevent cascading redraws on hover.
   - EPG JSON is fetched *once* on load and cached in a state array, preventing network waterfall stalls during rapid hovering.
-- Channel Hero image caches are robust, falling back to channel logos when EPG posters are missing.
+- EPG Mobile UI: The EPG grid automatically centers the red current-time playhead upon mounting, and programs feature mobile-only sticky titles.
+
+Video Player UX Improvements:
+- **Abandoned Security Camera PiP**: The experimental overlaid Camera PiP feature was removed entirely due to stability issues per user request.
+- **Native OS PiP Adjustments**: Native PiP is enabled for desktop mode. A `leavepictureinpicture` handler was added to immediately issue a `play()` command within 10ms of closing the PiP window via the native "X" button to circumvent the browser's hardcoded auto-pause.
 
 **MediaMTX Live Streaming Architecture (HDHomeRun & Custom Streams)**:
 - Migrated away from disk-based `.ts` chunk generation which caused severe disk I/O bottlenecks and stuttering.
@@ -74,20 +78,24 @@ scp .\bin\tvapp-linux mark@192.168.4.143:~/tvapp/tvapp
 | `internal/api/sources.go` | EPG and XMLTV import logic, HDHomeRun affiliate extraction |
 | `internal/stream/manager.go` | FFmpeg manager (Pipes to MediaMTX via RTSP, `-pkt_size 1200`) |
 | `web/src/components/ChannelList.tsx` | UI Guide, Hero Poster, Cached EPG, Memoized Carousel |
-| `web/src/components/VideoPlayer.tsx` | hls.js player with auto-recovery |
+| `web/src/components/EpgGrid.tsx` | EPG Timeline Guide (Desktop/Mobile view with sticky titles) |
+| `web/src/components/VideoPlayer.tsx` | hls.js player with Native PiP overrides |
 
 ## Known Constraints & Dead Ends
 
 - **Do Not Replace MediaMTX with go2rtc**: MediaMTX is our unified streaming server (handling RTSP ingestion from FFmpeg, WebRTC on `:8889`, and LL-HLS on `:8888`). A previous attempt to introduce `go2rtc` added unnecessary complexity and caused stream instability. WebRTC via MediaMTX is working well with FFmpeg audio transcoding (`pcm_mulaw`).
+- **Native OS PiP Auto-Pause**: The browser inherently fires a `pause` command when exiting PiP via the 'X' button. We successfully circumvent this using a 10ms `setTimeout()` inside `leavepictureinpicture`, but there is still a fractional visual pause as the browser halts and we immediately force it back into a playing state.
 
 ## Outstanding Tasks
 
-1. **RTSP Camera Bugs (HIGH PRIORITY)**: 
+1. **Mobile Sticky Titles Issue (HIGH PRIORITY)**: 
+   - The user noted that "there is an issue with the sticky titles but i we will pick back up tomorrow." In `EpgGrid.tsx`, `max-md:sticky max-md:left-0` was implemented to keep program titles visible on mobile during horizontal scrolling, and `overflow-hidden` was removed from the scrolling row so sticky could take effect. The exact issue needs further evaluation in the next session (perhaps sticky constraints within absolute positioning, z-indexing, or background clipping).
+2. **RTSP Camera Bugs**: 
    - A new dedicated `Cameras.tsx` dashboard was built to display RTSP security cameras via MediaMTX, decoupling them from the main TV channels. However, there are two major issues the next agent MUST fix:
      - The RTSP streams are still failing to play in the `Cameras.tsx` grid. The frontend attempts to load them via `/api/proxy?url=http://127.0.0.1:8888/{cam_id}/index.m3u8` to bypass firewall ports, but MediaMTX or the `proxyStreamHandler` is failing to serve the stream correctly.
      - The ghost RTSP cameras are STILL showing up in the `ChannelList.tsx` and `EpgGrid.tsx` pages. The backend has an aggressive SQLite cleanup script in `schema.go` `Init()`, but it doesn't seem to be working, or the frontend/backend is still incorrectly mapping the sources.
-2. **Distracting "Red Pill" UI**: When switching channels, a red "Starting stream..." pill flashes on the screen which the user finds distracting. Needs to be removed or smoothed out.
-3. **Quality Selector Settings**: Ensure the UI quality selector correctly reflects and respects the bitrate/quality set by the automated speedtest.
+3. **Distracting "Red Pill" UI**: When switching channels, a red "Starting stream..." pill flashes on the screen which the user finds distracting. Needs to be removed or smoothed out.
+4. **Quality Selector Settings**: Ensure the UI quality selector correctly reflects and respects the bitrate/quality set by the automated speedtest.
 
 ## Future Work
 

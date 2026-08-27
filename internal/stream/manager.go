@@ -242,9 +242,7 @@ func (s *Session) runLoop() {
 		}
 
 		videoArgs := []string{"-c:v", "copy"}
-		if s.TunerType == "rtsp" {
-			videoArgs = []string{"-c:v", "copy", "-c:a", "pcm_mulaw", "-ar", "8000", "-ac", "1"}
-		} else if s.TunerType == "hdhomerun" {
+		if s.TunerType == "hdhomerun" {
 			videoArgs = GetOptimalVideoArgs(s.Quality)
 		}
 
@@ -259,17 +257,22 @@ func (s *Session) runLoop() {
 
 		var args []string
 		if s.TunerType == "rtsp" {
-			args = append(args, 
+			args = []string{
 				"-rtsp_transport", "tcp",
-				"-fflags", "nobuffer",
-				"-flags", "low_delay",
-				"-err_detect", "ignore_err",
-				"-analyzeduration", "1000000",
-				"-probesize", "1000000",
-				"-use_wallclock_as_timestamps", "1",
+				"-timeout", "5000000",
 				"-i", streamURL,
-				"-sn",
-			)
+				"-map", "0:v:0",
+				"-map", "0:a?",
+				"-c:v", "copy",
+				"-bsf:v", "dump_extra",
+				"-c:a", "pcm_mulaw",
+				"-ar", "8000",
+				"-ac", "1",
+				"-f", "rtsp",
+				"-rtsp_transport", "tcp",
+				"-loglevel", "warning",
+				rtspURL,
+			}
 		} else {
 			args = append(args,
 				"-user_agent", userAgent,
@@ -280,38 +283,31 @@ func (s *Session) runLoop() {
 				"-i", streamURL,
 				"-sn",
 			)
-		}
-		args = append(args, videoArgs...)
-		
-		if s.Quality == "music" {
-			args = append(args,
-				"-c:a", "aac",
-				"-b:a", "192k",
-				"-ac", "2",
-				"-max_muxing_queue_size", "1024",
-				"-f", "rtsp",
-				"-rtsp_transport", "tcp",
-				"-loglevel", "warning",
-				rtspURL,
-			)
-		} else if s.TunerType == "rtsp" {
-			args = append(args,
-				"-f", "rtsp",
-				"-rtsp_transport", "tcp",
-				"-loglevel", "warning",
-				rtspURL,
-			)
-		} else {
-			args = append(args,
-				"-c:a", "aac",
-				"-b:a", "128k",
-				"-ac", "2",
-				"-f", "rtsp",
-				"-rtsp_transport", "tcp",
-				"-pkt_size", "1200",
-				"-loglevel", "warning",
-				rtspURL,
-			)
+			args = append(args, videoArgs...)
+			
+			if s.Quality == "music" {
+				args = append(args,
+					"-c:a", "aac",
+					"-b:a", "192k",
+					"-ac", "2",
+					"-max_muxing_queue_size", "1024",
+					"-f", "rtsp",
+					"-rtsp_transport", "tcp",
+					"-loglevel", "warning",
+					rtspURL,
+				)
+			} else {
+				args = append(args,
+					"-c:a", "aac",
+					"-b:a", "128k",
+					"-ac", "2",
+					"-f", "rtsp",
+					"-rtsp_transport", "tcp",
+					"-pkt_size", "1200",
+					"-loglevel", "warning",
+					rtspURL,
+				)
+			}
 		}
 
 		cmd := exec.Command("ffmpeg", args...)

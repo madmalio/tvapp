@@ -24,12 +24,16 @@ type PlayerContextType = {
   activeCamera: CameraInfo | null;
   pipCamera: CameraInfo | null;
   isMiniPlayerOpen: boolean;
+  miniPlayerEnabled: boolean;
+  cameraPipEnabled: boolean;
   isPlaying: boolean;
   isMuted: boolean;
   volume: number;
   playChannel: (channel: ChannelInfo) => void;
   playCamera: (camera: CameraInfo) => void;
   setPipCamera: (camera: CameraInfo | null) => void;
+  setMiniPlayerEnabled: (enabled: boolean) => void;
+  setCameraPipEnabled: (enabled: boolean) => void;
   stopPlayback: () => void;
   setIsPlaying: (playing: boolean) => void;
   setIsMuted: (muted: boolean) => void;
@@ -52,6 +56,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return saved !== null ? parseFloat(saved) : 1;
   });
 
+  const [miniPlayerEnabled, setMiniPlayerEnabled] = useState(() => {
+    const saved = localStorage.getItem("tvapp_miniplayer_enabled");
+    return saved !== null ? saved === "true" : true;
+  });
+
+  const [cameraPipEnabled, setCameraPipEnabled] = useState(() => {
+    const saved = localStorage.getItem("tvapp_camera_pip_enabled");
+    return saved !== null ? saved === "true" : true;
+  });
+
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -59,16 +73,50 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     location.pathname.startsWith("/player/") || 
     (location.pathname.startsWith("/cameras/") && location.pathname !== "/cameras");
 
-  // Manage mini-player visibility based on active playback and current route
+  // Manage mini-player visibility based on active playback, current route, screen size, and user preference
   useEffect(() => {
-    if (isFullPlayerRoute) {
+    const isMobile = typeof window !== "undefined" && (window.innerWidth < 768 || /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
+    if (isFullPlayerRoute || isMobile) {
       setIsMiniPlayerOpen(false);
-    } else if (activeChannel || activeCamera) {
+      // On mobile, when leaving the full player, stop active playback cleanly
+      if (!isFullPlayerRoute && isMobile && (activeChannel || activeCamera)) {
+        setActiveChannel(null);
+        setActiveCamera(null);
+      }
+    } else if ((activeChannel || activeCamera) && miniPlayerEnabled) {
       setIsMiniPlayerOpen(true);
     } else {
       setIsMiniPlayerOpen(false);
     }
-  }, [isFullPlayerRoute, activeChannel, activeCamera]);
+  }, [isFullPlayerRoute, activeChannel, activeCamera, miniPlayerEnabled]);
+
+  // Window resize handler to hide mini-player if resized to mobile
+  useEffect(() => {
+    const handleResize = () => {
+      const isMobile = typeof window !== "undefined" && (window.innerWidth < 768 || /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
+      if (isMobile && isMiniPlayerOpen) {
+        setIsMiniPlayerOpen(false);
+      }
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [isMiniPlayerOpen]);
+
+  const setMiniPlayerEnabledState = useCallback((enabled: boolean) => {
+    setMiniPlayerEnabled(enabled);
+    localStorage.setItem("tvapp_miniplayer_enabled", enabled.toString());
+    if (!enabled) {
+      setIsMiniPlayerOpen(false);
+    }
+  }, []);
+
+  const setCameraPipEnabledState = useCallback((enabled: boolean) => {
+    setCameraPipEnabled(enabled);
+    localStorage.setItem("tvapp_camera_pip_enabled", enabled.toString());
+    if (!enabled) {
+      setPipCamera(null);
+    }
+  }, []);
 
   const playChannel = useCallback((channel: ChannelInfo) => {
     setActiveCamera(null);
@@ -113,12 +161,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         activeCamera,
         pipCamera,
         isMiniPlayerOpen,
+        miniPlayerEnabled,
+        cameraPipEnabled,
         isPlaying,
         isMuted,
         volume,
         playChannel,
         playCamera,
         setPipCamera,
+        setMiniPlayerEnabled: setMiniPlayerEnabledState,
+        setCameraPipEnabled: setCameraPipEnabledState,
         stopPlayback,
         setIsPlaying,
         setIsMuted,

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, startTransition } from "react";
+import { useEffect, useState, useMemo, startTransition, useRef } from "react";
 import { Link } from "react-router-dom";
 import { getApiUrl, fetchWithCache } from "../lib/api";
 import { useApi } from "../hooks/useApi";
@@ -159,7 +159,7 @@ export default function EpgGrid() {
           </div>
 
           {/* Programs Row */}
-          <div className="flex relative items-center overflow-hidden" style={{ width: (durationHours * 2) * 30 * PIXELS_PER_MINUTE }}>
+          <div className="flex relative items-center" style={{ width: (durationHours * 2) * 30 * PIXELS_PER_MINUTE }}>
             {chEntries.map((e) => {
               const start = new Date(e.start_time);
               const end = new Date(e.end_time);
@@ -207,13 +207,15 @@ export default function EpgGrid() {
                 >
                   <Wrapper
                     {...wrapperProps}
-                    className="block text-left w-full h-full rounded-md p-2 overflow-hidden transition-all group/prog border border-transparent backdrop-blur-sm shadow-sm hover:border-blue-500 hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] hover:bg-neutral-800/80 focus:outline-none"
+                    className="block text-left w-full h-full rounded-md p-2 transition-all group/prog border border-transparent backdrop-blur-sm shadow-sm hover:border-blue-500 hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] hover:bg-neutral-800/80 focus:outline-none"
                     style={backgroundStyle}
                   >
-                    <h4 className={`font-medium text-sm truncate leading-tight mb-1 ${isActive ? 'text-blue-100 font-bold' : 'text-white'}`}>{e.title}</h4>
-                    <p className={`text-xs truncate ${isActive ? 'text-blue-300' : 'text-neutral-400 group-hover/prog:text-blue-200'}`}>
-                      {start.toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})} - {end.toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})}
-                    </p>
+                    <div className="max-md:sticky max-md:left-0 max-w-full w-max overflow-hidden flex flex-col">
+                      <h4 className={`font-medium text-sm truncate leading-tight mb-1 ${isActive ? 'text-blue-100 font-bold' : 'text-white'}`}>{e.title}</h4>
+                      <p className={`text-xs truncate ${isActive ? 'text-blue-300' : 'text-neutral-400 group-hover/prog:text-blue-200'}`}>
+                        {start.toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})} - {end.toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})}
+                      </p>
+                    </div>
                   </Wrapper>
                 </div>
               );
@@ -227,7 +229,16 @@ export default function EpgGrid() {
     });
   }, [sourceChannels, epgByChannel, gridStartTime, currentTime, currentTimeOffset, durationHours, activeCategory, visibleRows]);
 
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
+  // Scroll to current time on mount (or when grid data becomes available)
+  useEffect(() => {
+    if (!loading && scrollContainerRef.current && currentTimePixels > 0) {
+      // Offset by half screen width to center the current time line
+      const offset = Math.max(0, currentTimePixels - (window.innerWidth / 2) + 120);
+      scrollContainerRef.current.scrollLeft = offset;
+    }
+  }, [loading, currentTimePixels]);
 
   if (loading) {
     return (
@@ -262,6 +273,8 @@ export default function EpgGrid() {
       date: t
     };
   });
+
+
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollLeft, scrollWidth, clientWidth, scrollTop, scrollHeight, clientHeight } = e.currentTarget;
@@ -318,7 +331,7 @@ export default function EpgGrid() {
         </div>
       </div>
       
-      <div className="flex-1 overflow-auto relative bg-neutral-900/20 custom-scrollbar" onScroll={handleScroll}>
+      <div ref={scrollContainerRef} className="flex-1 overflow-auto relative bg-neutral-900/20 custom-scrollbar" onScroll={handleScroll}>
         <div className="min-w-max flex flex-col">
           
           {/* Timeline Header */}

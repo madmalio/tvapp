@@ -9,6 +9,8 @@ import {
   Maximize, 
   Minimize, 
   Video, 
+  VideoOff,
+  RotateCw,
   Volume2, 
   VolumeX,
   Play,
@@ -29,6 +31,8 @@ type SourceRow = {
 // =========================================================
 // Global In-Memory Camera Stream Cache for 0ms transitions & Auto-Recovery
 // =========================================================
+export type CameraState = "connecting" | "connected" | "offline";
+
 type CachedStream = {
   source: SourceRow;
   mediaStream: MediaStream;
@@ -36,6 +40,8 @@ type CachedStream = {
   streamId?: string;
   sessionId?: string;
   subscribers: Map<string, (stream: MediaStream) => void>;
+  stateSubscribers: Map<string, (state: CameraState) => void>;
+  state: CameraState;
   connected: boolean;
   connecting: boolean;
   cleanupTimer?: ReturnType<typeof setTimeout>;
@@ -43,6 +49,11 @@ type CachedStream = {
 };
 
 const cameraStreamCache = new Map<number, CachedStream>();
+
+function setStreamState(entry: CachedStream, state: CameraState) {
+  entry.state = state;
+  entry.stateSubscribers.forEach((cb) => cb(state));
+}
 
 // Global heartbeat for all active camera streams
 if (typeof window !== "undefined") {
@@ -55,13 +66,13 @@ if (typeof window !== "undefined") {
   }, 25000);
 }
 
-function getActiveStream(sourceId: number): CachedStream | undefined {
+export function getActiveStream(sourceId: number): CachedStream | undefined {
   const entry = cameraStreamCache.get(sourceId);
   if (
     entry &&
     entry.connected &&
     entry.mediaStream &&
-    entry.mediaStream.getTracks().length > 0 &&
+    entry.mediaStream.getTracks().some((t) => t.readyState === "live") &&
     entry.pc &&
     entry.pc.connectionState !== "closed" &&
     entry.pc.connectionState !== "failed" &&
@@ -72,7 +83,7 @@ function getActiveStream(sourceId: number): CachedStream | undefined {
   return undefined;
 }
 
-function destroyCameraConnection(entry: CachedStream) {
+function cleanupPeerConnection(entry: CachedStream) {
   if (entry.pc) {
     try {
       entry.pc.ontrack = null;
@@ -81,18 +92,42 @@ function destroyCameraConnection(entry: CachedStream) {
     } catch {}
     entry.pc = undefined;
   }
-  if (entry.sessionId) {
-    fetch(getApiUrl(`/api/stream/stop/${entry.sessionId}`), { method: "DELETE" }).catch(() => {});
-    entry.sessionId = undefined;
-    entry.streamId = undefined;
+  if (entry.mediaStream) {
+    try {
+      entry.mediaStream.getTracks().forEach((t) => {
+        try { t.stop(); } catch {}
+      });
+    } catch {}
+    entry.mediaStream = new MediaStream();
   }
   entry.connected = false;
   entry.connecting = false;
 }
 
+function stopCameraSession(entry: CachedStream) {
+  cleanupPeerConnection(entry);
+  if (entry.sessionId) {
+    fetch(getApiUrl(`/api/stream/stop/${entry.sessionId}`), { method: "DELETE" }).catch(() => {});
+    entry.sessionId = undefined;
+    entry.streamId = undefined;
+  }
+}
+
+function getWebrtcUrl(streamId: string): string {
+  const serverIp = localStorage.getItem('tvapp_server_ip') || '';
+  if (serverIp) {
+    try {
+      const url = serverIp.startsWith('http') ? new URL(serverIp) : new URL(`http://${serverIp}`);
+      return `http://${url.hostname}:8889/${streamId}/whep`;
+    } catch {}
+  }
+  return `http://${window.location.hostname}:8889/${streamId}/whep`;
+}
+
 async function startCameraConnection(entry: CachedStream) {
-  if (entry.connecting) return;
+  if (entry.connecting || entry.subscribers.size === 0) return;
   entry.connecting = true;
+  setStreamState(entry, "connecting");
 
   if (entry.retryTimer) {
     clearTimeout(entry.retryTimer);
@@ -100,12 +135,8 @@ async function startCameraConnection(entry: CachedStream) {
   }
 
   // Clean up any stale peer connection first
-  if (entry.pc) {
-    try {
-      entry.pc.close();
-    } catch {}
-    entry.pc = undefined;
-  }
+  cleanupPeerConnection(entry);
+  entry.connecting = true;
 
   try {
     const pc = new RTCPeerConnection({ iceServers: [] });
@@ -116,42 +147,46 @@ async function startCameraConnection(entry: CachedStream) {
     pc.ontrack = (event) => {
       if (!entry.mediaStream.getTracks().some(t => t.id === event.track.id)) {
         entry.mediaStream.addTrack(event.track);
+        setStreamState(entry, "connected");
+        entry.subscribers.forEach((cb) => cb(entry.mediaStream));
       }
-      entry.subscribers.forEach((cb) => cb(entry.mediaStream));
     };
 
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "failed" || pc.connectionState === "disconnected" || pc.connectionState === "closed") {
-        console.warn(`[Camera WebRTC] Connection state ${pc.connectionState} for camera ${entry.source.id}`);
-        destroyCameraConnection(entry);
-        scheduleRetry(entry);
+        cleanupPeerConnection(entry);
+        setStreamState(entry, "offline");
+        scheduleRetry(entry, 8000);
       }
     };
 
-    // Request stream from backend
-    const startRes = await fetch(getApiUrl("/api/stream/start"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: entry.source.url, tuner_type: "rtsp", quality: "720p_std" }),
-    });
-    if (!startRes.ok) {
-      throw new Error(`Start stream HTTP ${startRes.status}`);
+    // Ensure backend stream session is active
+    let streamId = entry.streamId;
+    if (!streamId) {
+      const startRes = await fetch(getApiUrl("/api/stream/start"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: entry.source.url, tuner_type: "rtsp", quality: "720p_std" }),
+      });
+      if (!startRes.ok) {
+        throw new Error(`Start stream HTTP ${startRes.status}`);
+      }
+      const startData = await startRes.json();
+      streamId = startData.id;
+      entry.streamId = streamId;
+      entry.sessionId = streamId;
     }
-    const startData = await startRes.json();
-    const streamId = startData.id;
-    entry.streamId = streamId;
-    entry.sessionId = streamId;
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
-    // WHEP handshake loop (retries up to 25 times, 300ms delay)
+    // WHEP handshake loop (retries up to 25 times, 350ms delay)
     let connected = false;
     let attempts = 0;
     while (!connected && attempts < 25 && entry.subscribers.size > 0 && entry.connecting) {
       attempts++;
       try {
-        const res = await fetch(`http://${window.location.hostname}:8889/${streamId}/whep`, {
+        const res = await fetch(getWebrtcUrl(streamId!), {
           method: "POST",
           headers: { "Content-Type": "application/sdp" },
           body: offer.sdp,
@@ -162,25 +197,28 @@ async function startCameraConnection(entry: CachedStream) {
           connected = true;
           entry.connected = true;
           entry.connecting = false;
+          setStreamState(entry, "connected");
           entry.subscribers.forEach((cb) => cb(entry.mediaStream));
           return;
         }
       } catch (e) {
         // retry
       }
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 350));
     }
 
     if (!connected) {
       throw new Error("WHEP handshake timeout");
     }
   } catch (err) {
-    destroyCameraConnection(entry);
-    scheduleRetry(entry);
+    cleanupPeerConnection(entry);
+    entry.connecting = false;
+    setStreamState(entry, "offline");
+    scheduleRetry(entry, 8000);
   }
 }
 
-function scheduleRetry(entry: CachedStream) {
+function scheduleRetry(entry: CachedStream, delayMs = 8000) {
   if (entry.subscribers.size === 0) return;
   if (entry.retryTimer) return;
   entry.retryTimer = setTimeout(() => {
@@ -188,13 +226,25 @@ function scheduleRetry(entry: CachedStream) {
     if (entry.subscribers.size > 0 && !entry.connected && !entry.connecting) {
       startCameraConnection(entry);
     }
-  }, 4000);
+  }, delayMs);
 }
 
-function acquireCameraStream(
+export function retryCameraStream(sourceId: number) {
+  const entry = cameraStreamCache.get(sourceId);
+  if (!entry) return;
+  if (entry.retryTimer) {
+    clearTimeout(entry.retryTimer);
+    entry.retryTimer = undefined;
+  }
+  entry.connecting = false;
+  startCameraConnection(entry);
+}
+
+export function acquireCameraStream(
   source: SourceRow,
   subscriberId: string,
-  onStreamReady: (stream: MediaStream) => void
+  onStreamReady: (stream: MediaStream) => void,
+  onStateChange?: (state: CameraState) => void
 ) {
   let entry = cameraStreamCache.get(source.id);
   if (!entry) {
@@ -202,10 +252,13 @@ function acquireCameraStream(
       source,
       mediaStream: new MediaStream(),
       subscribers: new Map([[subscriberId, onStreamReady]]),
+      stateSubscribers: onStateChange ? new Map([[subscriberId, onStateChange]]) : new Map(),
+      state: "connecting",
       connected: false,
       connecting: false,
     };
     cameraStreamCache.set(source.id, entry);
+    if (onStateChange) onStateChange("connecting");
     startCameraConnection(entry);
     return;
   }
@@ -216,18 +269,25 @@ function acquireCameraStream(
   }
 
   entry.subscribers.set(subscriberId, onStreamReady);
+  if (onStateChange) {
+    entry.stateSubscribers.set(subscriberId, onStateChange);
+    onStateChange(entry.state);
+  }
 
-  if (entry.connected && entry.mediaStream.getTracks().length > 0) {
+  if (entry.connected && entry.mediaStream.getTracks().some(t => t.readyState === "live")) {
     onStreamReady(entry.mediaStream);
-  } else if (!entry.connecting) {
-    startCameraConnection(entry);
+  } else {
+    if (!entry.connecting) {
+      startCameraConnection(entry);
+    }
   }
 }
 
-function releaseCameraStream(sourceId: number, subscriberId: string) {
+export function releaseCameraStream(sourceId: number, subscriberId: string) {
   const entry = cameraStreamCache.get(sourceId);
   if (!entry) return;
   entry.subscribers.delete(subscriberId);
+  entry.stateSubscribers.delete(subscriberId);
 
   if (entry.subscribers.size === 0) {
     if (entry.cleanupTimer) clearTimeout(entry.cleanupTimer);
@@ -239,7 +299,7 @@ function releaseCameraStream(sourceId: number, subscriberId: string) {
     entry.cleanupTimer = setTimeout(() => {
       const current = cameraStreamCache.get(sourceId);
       if (current && current.subscribers.size === 0) {
-        destroyCameraConnection(current);
+        stopCameraSession(current);
         cameraStreamCache.delete(sourceId);
       }
     }, 15000);
@@ -265,7 +325,7 @@ function CameraPlayerView({
   const [isPlaying, setIsPlaying] = useState(true);
   const [showOverlay, setShowOverlay] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [status, setStatus] = useState("Loading...");
+
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { playCamera } = usePlayer();
 
@@ -277,6 +337,19 @@ function CameraPlayerView({
     const saved = localStorage.getItem("tvapp_camera_muted");
     return saved !== null ? saved === "true" : true;
   });
+
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.innerWidth < 768 || /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  });
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768 || /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
+    };
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -404,6 +477,8 @@ function CameraPlayerView({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [camera, allCameras, drawerOpen, onSelectCamera, onClose]);
 
+  const [cameraState, setCameraState] = useState<CameraState>("connecting");
+
   // Acquire or reuse stream from in-memory cache
   useEffect(() => {
     const video = videoRef.current;
@@ -421,33 +496,49 @@ function CameraPlayerView({
       video.muted = isMuted;
       video.play().then(() => {
         if (isMounted) {
-          setStatus("");
+          
           setIsPlaying(true);
+          setCameraState("connected");
         }
       }).catch(() => {
         video.muted = true;
         video.play().catch(() => {});
-        if (isMounted) setStatus("");
+        if (isMounted) {
+          
+          setCameraState("connected");
+        }
       });
     } else {
-      setStatus("Loading...");
+      
+      setCameraState("connecting");
     }
 
-    acquireCameraStream(camera, subId, (stream) => {
-      if (isMounted && video) {
-        video.srcObject = stream;
-        video.volume = volume;
-        video.muted = isMuted;
-        video.play().then(() => {
-          setStatus("");
-          setIsPlaying(true);
-        }).catch(() => {
-          video.muted = true;
-          video.play().catch(() => {});
-          setStatus("");
-        });
+    acquireCameraStream(
+      camera,
+      subId,
+      (stream) => {
+        if (isMounted && video) {
+          video.srcObject = stream;
+          video.volume = volume;
+          video.muted = isMuted;
+          video.play().then(() => {
+            
+            setIsPlaying(true);
+            setCameraState("connected");
+          }).catch(() => {
+            video.muted = true;
+            video.play().catch(() => {});
+            
+            setCameraState("connected");
+          });
+        }
+      },
+      (state) => {
+        if (isMounted) {
+          setCameraState(state);
+        }
       }
-    });
+    );
 
     return () => {
       isMounted = false;
@@ -468,7 +559,10 @@ function CameraPlayerView({
         className="absolute inset-0 w-full h-full object-contain bg-black z-0"
         autoPlay
         playsInline
-        onPlay={() => setIsPlaying(true)}
+        onPlay={() => {
+          setIsPlaying(true);
+          setCameraState("connected");
+        }}
         onPause={() => setIsPlaying(false)}
         onVolumeChange={(e) => {
           setVolume(e.currentTarget.volume);
@@ -476,21 +570,37 @@ function CameraPlayerView({
         }}
       />
 
-      {/* Status Overlays (exact match to VideoPlayer.tsx) */}
-      {status === "Loading..." || status === "Recovering..." || status === "Starting stream..." ? (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20 bg-black">
-          <div className="flex flex-col items-center">
-            <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mb-4" />
-            <p className="text-white font-medium drop-shadow-md">{status}</p>
+      {/* Offline Player Overlay */}
+      {cameraState === "offline" && (
+        <div className="absolute inset-0 flex items-center justify-center z-20 bg-black/90 p-6 pointer-events-auto">
+          <div className="flex flex-col items-center text-center max-w-sm">
+            <div className="w-16 h-16 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center mb-4 shadow-xl">
+              <VideoOff className="w-8 h-8 text-neutral-400" />
+            </div>
+            <h3 className="text-xl font-bold text-white mb-1.5">Camera Offline</h3>
+            <p className="text-xs text-neutral-400 mb-6">
+              Unable to establish connection to this camera. Scanning automatically in background...
+            </p>
+            <button
+              onClick={() => retryCameraStream(camera.id)}
+              className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-semibold shadow-lg hover:shadow-blue-500/20 transition-all cursor-pointer active:scale-95"
+            >
+              <RotateCw className="w-4 h-4" />
+              Retry Connection
+            </button>
           </div>
         </div>
-      ) : status ? (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-          <p className={`text-white font-medium backdrop-blur-md px-6 py-2 rounded-full shadow-lg transition-all duration-300 ${status.toLowerCase().includes('error') || status.toLowerCase().includes('fail') ? 'bg-red-600/90' : 'bg-neutral-900/80 border border-neutral-700'}`}>
-            {status}
-          </p>
+      )}
+
+      {/* Connecting Spinner Overlay */}
+      {cameraState === "connecting" && !isPlaying && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20 bg-black/80">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+            <p className="text-white font-medium text-sm drop-shadow-md">Connecting to camera...</p>
+          </div>
         </div>
-      ) : null}
+      )}
 
       {/* Cinematic Overlays (Auto hides - exact match to VideoPlayer.tsx) */}
       <div 
@@ -498,17 +608,17 @@ function CameraPlayerView({
           showOverlay ? "opacity-100" : "opacity-0"
         }`}
       >
-        <div className="h-48 bg-gradient-to-b from-black/90 via-black/40 to-transparent flex items-start p-6 md:p-8">
-          <div className="pointer-events-auto flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+        <div className="h-auto min-h-[4.5rem] sm:h-44 bg-gradient-to-b from-black/90 via-black/40 to-transparent flex items-start p-3 sm:p-6 md:p-8 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
+          <div className="pointer-events-auto flex items-center gap-2 sm:gap-4 max-w-full min-w-0" onClick={(e) => e.stopPropagation()}>
             <button 
               onClick={(e) => { e.stopPropagation(); onClose(); }}
-              className="p-3 bg-neutral-900/50 hover:bg-neutral-800 text-white rounded-full backdrop-blur-sm transition-colors flex items-center justify-center mr-2 shadow-lg cursor-pointer"
+              className="p-2 sm:p-3 bg-neutral-900/50 hover:bg-neutral-800 text-white rounded-full backdrop-blur-sm transition-colors flex items-center justify-center shrink-0 shadow-lg cursor-pointer"
               title="Exit Player"
             >
-              <ArrowLeft className="w-6 h-6" />
+              <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6" />
             </button>
-            <div>
-              <h2 className="text-2xl md:text-4xl font-bold text-white tracking-tight drop-shadow-lg">
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-2xl md:text-4xl font-bold text-white tracking-tight drop-shadow-lg truncate">
                 {camera.name}
               </h2>
             </div>
@@ -516,25 +626,27 @@ function CameraPlayerView({
         </div>
 
         {/* Custom Bottom Controls (exact match to VideoPlayer.tsx) */}
-        <div className="h-36 sm:h-48 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex items-end p-4 sm:p-6 md:p-8">
-          <div className="w-full flex items-center justify-between pointer-events-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-3 sm:gap-4 md:gap-6">
+        <div className="h-auto min-h-[4.5rem] sm:h-44 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex items-end p-3 sm:p-6 md:p-8 pb-[max(0.75rem,env(safe-area-inset-bottom))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
+          <div className="w-full flex items-center justify-between gap-1 sm:gap-3 pointer-events-auto overflow-x-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 sm:gap-4 shrink-0">
               <button 
                 onClick={togglePlay} 
-                className="text-white hover:text-blue-400 transition-colors focus:outline-none cursor-pointer"
+                className="text-white hover:text-blue-400 transition-colors focus:outline-none cursor-pointer p-1"
               >
-                {isPlaying ? <Pause className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 fill-current" /> : <Play className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 fill-current" />}
+                {isPlaying ? <Pause className="w-6 h-6 sm:w-8 sm:h-8 md:w-10 md:h-10 fill-current" /> : <Play className="w-6 h-6 sm:w-8 sm:h-8 md:w-10 md:h-10 fill-current" />}
               </button>
 
-              <div className="flex items-center gap-1.5 sm:gap-2 transition-colors">
-                <span className="w-2 h-2 rounded-full bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.8)] animate-pulse"></span>
-                <span className="font-bold text-xs sm:text-sm tracking-wider text-white/90">LIVE</span>
+              <div className="flex items-center gap-1 sm:gap-2 transition-colors">
+                <span className={`w-2 h-2 rounded-full ${cameraState === "connected" ? "bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.8)] animate-pulse" : cameraState === "connecting" ? "bg-amber-400 animate-pulse" : "bg-neutral-500"}`}></span>
+                <span className="font-bold text-[11px] sm:text-sm tracking-wider text-white/90">
+                  {cameraState === "connected" ? "LIVE" : cameraState === "connecting" ? "CONNECTING" : "OFFLINE"}
+                </span>
               </div>
             </div>
 
-            <div className="flex items-center gap-1 sm:gap-2 md:gap-4">
+            <div className="flex items-center gap-0.5 sm:gap-2 md:gap-4 shrink-0">
               {/* Audio Controls */}
-              <div className="flex items-center gap-2 md:gap-3 group/volume mr-1 sm:mr-2">
+              <div className="flex items-center gap-1 sm:gap-3 group/volume">
                 <button 
                   onClick={(e) => { 
                     e.stopPropagation(); 
@@ -547,42 +659,44 @@ function CameraPlayerView({
                       }
                     }
                   }}
-                  className="text-white hover:text-blue-400 transition-colors focus:outline-none cursor-pointer p-1"
+                  className="p-1.5 sm:p-2 text-white hover:text-blue-400 rounded-full transition-colors flex items-center justify-center focus:outline-none cursor-pointer"
                   title={isMuted ? "Unmute" : "Mute"}
                 >
-                  {isMuted || volume === 0 ? <VolumeX className="w-5 h-5 sm:w-6 sm:h-6" /> : <Volume2 className="w-5 h-5 sm:w-6 sm:h-6" />}
+                  {isMuted || volume === 0 ? (
+                    <VolumeX className="w-5 h-5 sm:w-6 sm:h-6 text-red-400" />
+                  ) : (
+                    <Volume2 className="w-5 h-5 sm:w-6 sm:h-6" />
+                  )}
                 </button>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="1" 
-                  step="0.05" 
-                  value={isMuted ? 0 : volume}
-                  onChange={(e) => {
-                    e.stopPropagation();
-                    const val = parseFloat(e.target.value);
-                    setVolume(val);
-                    if (val > 0) setIsMuted(false);
-                    if (videoRef.current) {
-                      videoRef.current.volume = val;
-                      if (val > 0) videoRef.current.muted = false;
-                    }
-                  }}
-                  style={{
-                    background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(isMuted ? 0 : volume) * 100}%, #525252 ${(isMuted ? 0 : volume) * 100}%, #525252 100%)`
-                  }}
-                  className="hidden sm:block w-20 md:w-24 h-1.5 md:h-2 rounded-full appearance-none outline-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 md:[&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-3 md:[&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-md hover:[&::-webkit-slider-thumb]:scale-125 [&::-webkit-slider-thumb]:transition-transform"
-                />
+
+                <div className="w-16 sm:w-24 md:w-28 flex items-center">
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={isMuted ? 0 : volume}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      const val = parseFloat(e.target.value);
+                      setVolume(val);
+                      setIsMuted(val === 0);
+                    }}
+                    className="w-full h-1.5 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-blue-500 focus:outline-none"
+                  />
+                </div>
               </div>
 
-              {/* Picture in Picture */}
-              <button 
-                onClick={toggleNativePip}
-                className="p-1.5 sm:p-2 text-white hover:text-blue-400 rounded-full transition-colors flex items-center justify-center focus:outline-none cursor-pointer"
-                title="Picture in Picture"
-              >
-                <PictureInPicture2 className="w-5 h-5 sm:w-6 sm:h-6" />
-              </button>
+              {/* Native OS Picture in Picture */}
+              {!isMobile && (
+                <button
+                  onClick={toggleNativePip}
+                  className="hidden md:flex p-1.5 sm:p-2 text-white hover:text-blue-400 rounded-full transition-colors items-center justify-center focus:outline-none cursor-pointer"
+                  title="Picture in Picture"
+                >
+                  <PictureInPicture2 className="w-5 h-5 sm:w-6 sm:h-6" />
+                </button>
+              )}
 
               {/* More Cameras button */}
               <button 
@@ -657,6 +771,7 @@ function CameraCard({
   onSelect: (source: SourceRow) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [cameraState, setCameraState] = useState<CameraState>("connecting");
 
   useEffect(() => {
     const video = videoRef.current;
@@ -669,15 +784,26 @@ function CameraCard({
     const cached = getActiveStream(source.id);
     if (cached && cached.mediaStream.getTracks().length > 0) {
       video.srcObject = cached.mediaStream;
-      video.play().catch(() => {});
+      video.play().then(() => {
+        if (isMounted) setCameraState("connected");
+      }).catch(() => {});
     }
 
-    acquireCameraStream(source, subId, (stream) => {
-      if (isMounted && video) {
-        video.srcObject = stream;
-        video.play().catch(() => {});
+    acquireCameraStream(
+      source,
+      subId,
+      (stream) => {
+        if (isMounted && video) {
+          video.srcObject = stream;
+          video.play().then(() => {
+            if (isMounted) setCameraState("connected");
+          }).catch(() => {});
+        }
+      },
+      (state) => {
+        if (isMounted) setCameraState(state);
       }
-    });
+    );
 
     return () => {
       isMounted = false;
@@ -685,23 +811,36 @@ function CameraCard({
     };
   }, [source]);
 
+  const handleRetry = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    retryCameraStream(source.id);
+  };
+
   return (
     <div
       tabIndex={0}
       onClick={() => {
-        lockToLandscape();
-        onSelect(source);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
+        if (cameraState !== "offline") {
           lockToLandscape();
           onSelect(source);
         }
       }}
-      className="group relative w-full sm:w-[calc(50%-12px)] lg:w-[320px] aspect-video bg-neutral-900 rounded-xl overflow-hidden snap-start transition-all duration-300 hover:scale-105 hover:z-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-neutral-950 shadow-lg border-2 border-transparent hover:border-blue-500 hover:shadow-[0_0_20px_rgba(59,130,246,0.6)] cursor-pointer shrink-0"
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          if (cameraState !== "offline") {
+            lockToLandscape();
+            onSelect(source);
+          }
+        }
+      }}
+      className={`group relative w-full sm:w-[calc(50%-12px)] lg:w-[320px] aspect-video bg-neutral-900 rounded-xl overflow-hidden snap-start transition-all duration-300 shadow-lg border-2 ${
+        cameraState === "offline"
+          ? "border-neutral-800 hover:border-neutral-700 opacity-90"
+          : "border-transparent hover:border-blue-500 hover:scale-105 hover:z-10 hover:shadow-[0_0_20px_rgba(59,130,246,0.6)] cursor-pointer"
+      } shrink-0`}
     >
-      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity z-10" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity z-10 pointer-events-none" />
 
       <video
         ref={videoRef}
@@ -709,17 +848,54 @@ function CameraCard({
         autoPlay
         playsInline
         muted
+        onPlaying={() => setCameraState("connected")}
       />
 
+      {/* Connecting Spinner */}
+      {cameraState === "connecting" && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-neutral-950/85 z-15 pointer-events-none gap-2">
+          <div className="w-8 h-8 border-3 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
+          <span className="text-[11px] font-medium text-neutral-300 tracking-wide">Connecting stream...</span>
+        </div>
+      )}
+
+      {/* Offline Card State with Retry Button */}
+      {cameraState === "offline" && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-neutral-950/90 z-15 p-4 text-center">
+          <div className="w-9 h-9 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center mb-2 shadow-inner">
+            <VideoOff className="w-4 h-4 text-neutral-400" />
+          </div>
+          <p className="text-xs font-semibold text-neutral-200 mb-0.5">Camera Offline</p>
+          <p className="text-[10px] text-neutral-500 mb-2.5">Auto-scanning every 8s...</p>
+          <button
+            onClick={handleRetry}
+            className="flex items-center gap-1.5 px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-[11px] font-medium transition-all duration-150 shadow-md cursor-pointer active:scale-95"
+          >
+            <RotateCw className="w-3 h-3" />
+            Retry Now
+          </button>
+        </div>
+      )}
+
       {/* Card Overlay Info */}
-      <div className="absolute inset-0 flex flex-col justify-between p-4 z-20 pointer-events-none">
-        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/60 backdrop-blur-sm self-start">
-          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-          <span className="text-[10px] font-bold text-white tracking-wider uppercase">LIVE</span>
+      <div className="absolute inset-0 flex flex-col justify-between p-3.5 z-20 pointer-events-none">
+        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/70 backdrop-blur-sm self-start border border-white/5">
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${
+              cameraState === "connected"
+                ? "bg-red-500 animate-pulse"
+                : cameraState === "connecting"
+                ? "bg-amber-400 animate-pulse"
+                : "bg-neutral-500"
+            }`}
+          />
+          <span className="text-[10px] font-bold text-white tracking-wider uppercase">
+            {cameraState === "connected" ? "LIVE" : cameraState === "connecting" ? "CONNECTING" : "OFFLINE"}
+          </span>
         </div>
 
         <div>
-          <span className="text-white font-semibold text-base drop-shadow-md truncate block">
+          <span className="text-white font-semibold text-sm drop-shadow-md truncate block">
             {source.name}
           </span>
         </div>
@@ -804,4 +980,4 @@ export default function Cameras() {
   );
 }
 
-
+

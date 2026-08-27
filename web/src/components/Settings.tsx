@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { getApiUrl, clearApiCache } from "../lib/api";
 import { useApi } from "../hooks/useApi";
+import { usePlayer } from "../context/PlayerContext";
 
 type Tab = 'iptv' | 'server' | 'rtsp' | 'dvr' | 'preferences';
 type Source = { id: number; name: string; type: string; url: string; epg_url: string; };
@@ -56,6 +57,11 @@ function formatRtspSummary(url: string): string {
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<Tab>('iptv');
+  
+  const { 
+    miniPlayerEnabled, 
+    setMiniPlayerEnabled
+  } = usePlayer();
   
   // IPTV Multi-Source State
   const { data: sources, refetch: refetchSources } = useApi<Source[]>('/api/sources');
@@ -755,11 +761,39 @@ export default function Settings() {
                     <div className="text-right text-[11px] sm:text-xs text-neutral-400 mt-1">{defaultVolume}%</div>
                   </div>
                 </div>
-                
-                <div className="mt-5 sm:mt-6 pt-4 sm:pt-6 border-t border-neutral-700/50 flex justify-end">
-                  <button className="bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-medium px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg transition-all cursor-pointer shadow-md">
-                    Save Changes
-                  </button>
+
+                <div className="mt-6 pt-5 border-t border-neutral-700/50 space-y-4">
+                  <h4 className="text-xs sm:text-sm font-semibold text-neutral-300 uppercase tracking-wider">
+                    Picture-in-Picture (PiP) Options
+                  </h4>
+
+                  {/* In-App MiniPlayer Toggle */}
+                  <div className="flex items-center justify-between p-3 sm:p-4 rounded-xl bg-neutral-900/60 border border-neutral-700/50">
+                    <div className="pr-4">
+                      <div className="text-xs sm:text-sm font-medium text-white">In-App MiniPlayer</div>
+                      <div className="text-[11px] sm:text-xs text-neutral-400 mt-0.5">
+                        Dock stream into a floating corner mini-player when browsing channels or the TV guide.
+                      </div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={miniPlayerEnabled}
+                        onChange={(e) => {
+                          setMiniPlayerEnabled(e.target.checked);
+                          addToast({
+                            type: 'success',
+                            title: e.target.checked ? 'MiniPlayer Enabled' : 'MiniPlayer Disabled',
+                            message: e.target.checked 
+                              ? 'Streams will dock into a floating mini-player upon leaving player.' 
+                              : 'Streams will stop when exiting full player.'
+                          });
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-neutral-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                  </div>
                 </div>
               </div>
             </div>
