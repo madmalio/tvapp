@@ -60,7 +60,9 @@ export default function Settings() {
   
   const { 
     miniPlayerEnabled, 
-    setMiniPlayerEnabled
+    setMiniPlayerEnabled,
+    cameraPipEnabled,
+    setCameraPipEnabled
   } = usePlayer();
   
   // IPTV Multi-Source State
@@ -787,6 +789,33 @@ export default function Settings() {
                             message: e.target.checked 
                               ? 'Streams will dock into a floating mini-player upon leaving player.' 
                               : 'Streams will stop when exiting full player.'
+                          });
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-neutral-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 sm:p-4 rounded-xl bg-neutral-900/60 border border-neutral-700/50">
+                    <div className="pr-4">
+                      <div className="text-xs sm:text-sm font-medium text-white">Camera Picture-in-Picture</div>
+                      <div className="text-[11px] sm:text-xs text-neutral-400 mt-0.5">
+                        Show a floating overlay of any RTSP security camera on top of live TV broadcasts.
+                      </div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={cameraPipEnabled}
+                        onChange={(e) => {
+                          setCameraPipEnabled(e.target.checked);
+                          addToast({
+                            type: 'success',
+                            title: e.target.checked ? 'Camera PiP Enabled' : 'Camera PiP Disabled',
+                            message: e.target.checked 
+                              ? 'Security cameras can now be pinned over TV broadcasts.' 
+                              : 'Security cameras will no longer overlay TV broadcasts.'
                           });
                         }}
                         className="sr-only peer"

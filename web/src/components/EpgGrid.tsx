@@ -210,7 +210,7 @@ export default function EpgGrid() {
                     className="block text-left w-full h-full rounded-md p-2 transition-all group/prog border border-transparent backdrop-blur-sm shadow-sm hover:border-blue-500 hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] hover:bg-neutral-800/80 focus:outline-none"
                     style={backgroundStyle}
                   >
-                    <div className="max-md:sticky max-md:left-0 max-w-full w-max overflow-hidden flex flex-col">
+                    <div className="max-md:sticky max-md:left-24 max-w-full w-max overflow-hidden flex flex-col">
                       <h4 className={`font-medium text-sm truncate leading-tight mb-1 ${isActive ? 'text-blue-100 font-bold' : 'text-white'}`}>{e.title}</h4>
                       <p className={`text-xs truncate ${isActive ? 'text-blue-300' : 'text-neutral-400 group-hover/prog:text-blue-200'}`}>
                         {start.toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})} - {end.toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})}

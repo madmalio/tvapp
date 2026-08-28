@@ -14,7 +14,6 @@ export default function MiniPlayer() {
     volume,
     setIsPlaying,
     setIsMuted,
-    setVolume,
     expandMiniPlayer,
     closeMiniPlayer,
   } = usePlayer();
