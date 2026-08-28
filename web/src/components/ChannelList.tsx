@@ -121,7 +121,16 @@ const ChannelCarousel = memo(function ChannelCarousel({ groupName, channels, onH
 export default function ChannelList() {
   const { data: sourcesData } = useApi<Source[]>('/api/sources');
   const sources = useMemo(() => sourcesData?.filter(s => s.type !== 'rtsp') || [], [sourcesData]);
-  const [activeSourceId, setActiveSourceId] = useState<number | null>(null);
+  const [activeSourceId, setActiveSourceId] = useState<number | null>(() => {
+    const saved = sessionStorage.getItem("tvapp_channels_source");
+    return saved ? parseInt(saved, 10) : null;
+  });
+
+  useEffect(() => {
+    if (activeSourceId !== null) {
+      sessionStorage.setItem("tvapp_channels_source", activeSourceId.toString());
+    }
+  }, [activeSourceId]);
 
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -136,12 +145,20 @@ export default function ChannelList() {
   }, []);
 
   useEffect(() => {
-    if (sources && sources.length > 0 && activeSourceId === null) {
-      setActiveSourceId(sources[0].id);
+    if (sources && sources.length > 0) {
+      if (activeSourceId === null || !sources.some(s => s.id === activeSourceId)) {
+        setActiveSourceId(sources[0].id);
+      }
     }
   }, [sources, activeSourceId]);
 
-  const [activeCategory, setActiveCategory] = useState<string>('All');
+  const [activeCategory, setActiveCategory] = useState<string>(() => {
+    return sessionStorage.getItem("tvapp_channels_category") || 'All';
+  });
+
+  useEffect(() => {
+    sessionStorage.setItem("tvapp_channels_category", activeCategory);
+  }, [activeCategory]);
 
   const sourceChannels = useMemo(() => {
     if (!activeSourceId) return [];
@@ -372,3 +389,4 @@ export default function ChannelList() {
     </div>
   );
 }
+

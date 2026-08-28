@@ -49,13 +49,30 @@ function mapCategory(rawGroup: string, channelName: string = ""): string {
 export default function EpgGrid() {
   const { data: sourcesData } = useApi<Source[]>('/api/sources');
   const sources = useMemo(() => sourcesData?.filter(s => s.type !== 'rtsp') || [], [sourcesData]);
-  const [activeSourceId, setActiveSourceId] = useState<number | null>(null);
+  const [activeSourceId, setActiveSourceId] = useState<number | null>(() => {
+    const saved = sessionStorage.getItem("tvapp_epg_source");
+    return saved ? parseInt(saved, 10) : null;
+  });
+
+  useEffect(() => {
+    if (activeSourceId !== null) {
+      sessionStorage.setItem("tvapp_epg_source", activeSourceId.toString());
+    }
+  }, [activeSourceId]);
 
   const [channels, setChannels] = useState<Channel[]>([]);
   const [entries, setEntries] = useState<EPGEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedProgram, setSelectedProgram] = useState<{ entry: EPGEntry, channel: Channel } | null>(null);
-  const [activeCategory, setActiveCategory] = useState<string>('All');
+  
+  const [activeCategory, setActiveCategory] = useState<string>(() => {
+    return sessionStorage.getItem("tvapp_epg_category") || 'All';
+  });
+
+  useEffect(() => {
+    sessionStorage.setItem("tvapp_epg_category", activeCategory);
+  }, [activeCategory]);
+
   const [visibleRows, setVisibleRows] = useState(20);
 
   useEffect(() => {
@@ -63,8 +80,10 @@ export default function EpgGrid() {
   }, [activeSourceId, activeCategory]);
 
   useEffect(() => {
-    if (sources && sources.length > 0 && activeSourceId === null) {
-      setActiveSourceId(sources[0].id);
+    if (sources && sources.length > 0) {
+      if (activeSourceId === null || !sources.some(s => s.id === activeSourceId)) {
+        setActiveSourceId(sources[0].id);
+      }
     }
   }, [sources, activeSourceId]);
 
@@ -422,3 +441,4 @@ export default function EpgGrid() {
     </div>
   );
 }
+
