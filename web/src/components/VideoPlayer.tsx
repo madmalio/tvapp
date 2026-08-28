@@ -664,10 +664,10 @@ export default function VideoPlayer() {
       />
 
       {/* Pinned Security Camera PiP Overlay */}
-      {cameraPipEnabled && !pipCamera && rtspCameras.length > 0 && (
+      {!isMobile && cameraPipEnabled && !pipCamera && rtspCameras.length > 0 && (
         <BackgroundCameraPreloader camera={lastPipCamera || rtspCameras[0]} />
       )}
-      {pipCamera && (
+      {!isMobile && pipCamera && (
         <PinnedCameraOverlay
           camera={pipCamera}
           allCameras={rtspCameras}
@@ -828,7 +828,7 @@ export default function VideoPlayer() {
               )}
 
               {/* Security Camera PiP Overlay Toggle */}
-              {cameraPipEnabled && rtspCameras.length > 0 && (
+              {!isMobile && cameraPipEnabled && rtspCameras.length > 0 && (
                 <div className="relative">
                   <button
                     onClick={(e) => {

@@ -18,7 +18,7 @@ let listeners: Array<() => void> = [];
 
 export function useSpeedTest() {
   const [preferredQuality, setPreferredQuality] = useState<StreamQuality>(() => {
-    return globalPreferredQuality || (localStorage.getItem('preferredQuality') as StreamQuality) || 'source';
+    return globalPreferredQuality || (sessionStorage.getItem('preferredQuality') as StreamQuality) || 'source';
   });
   const [speedMbps, setSpeedMbps] = useState<number | null>(globalSpeedMbps);
   const [isTesting, setIsTesting] = useState(!globalSpeedTestRun || (globalSpeedTestRun && globalSpeedMbps === null));
@@ -76,11 +76,11 @@ export function useSpeedTest() {
           targetQuality = '360p_low';
         }
 
-        if (!localStorage.getItem('userQualitySet')) {
+        if (!sessionStorage.getItem('userQualitySet')) {
             globalPreferredQuality = targetQuality;
-            localStorage.setItem('preferredQuality', targetQuality);
+            sessionStorage.setItem('preferredQuality', targetQuality);
         } else {
-            globalPreferredQuality = (localStorage.getItem('preferredQuality') as StreamQuality) || 'source';
+            globalPreferredQuality = (sessionStorage.getItem('preferredQuality') as StreamQuality) || 'source';
         }
 
       } catch (err) {
@@ -94,10 +94,11 @@ export function useSpeedTest() {
 
   const manuallySetQuality = (quality: StreamQuality) => {
     globalPreferredQuality = quality;
-    localStorage.setItem('preferredQuality', quality);
-    localStorage.setItem('userQualitySet', 'true');
+    sessionStorage.setItem('preferredQuality', quality);
+    sessionStorage.setItem('userQualitySet', 'true');
     listeners.forEach(l => l());
   };
 
   return { preferredQuality, manuallySetQuality, speedMbps, isTesting };
 }
+
