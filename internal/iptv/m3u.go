@@ -22,6 +22,7 @@ var (
 	groupRe   = regexp.MustCompile(`group-title="([^"]*)"`)
 	tvgIDRe   = regexp.MustCompile(`tvg-id="([^"]*)"`)
 	channelID = regexp.MustCompile(`channel-id="([^"]*)"`)
+	epgUrlRe  = regexp.MustCompile(`(?:url-tvg|x-tvg-url)="?([^"\s]+)"?`)
 )
 
 func httpClient() *http.Client {
@@ -59,15 +60,9 @@ func parseM3UContent(content string) ([]Channel, string) {
 	var channels []Channel
 	epgUrl := ""
 
-	if len(lines) > 0 && strings.HasPrefix(lines[0], "#EXTM3U") {
-		// Try to extract x-tvg-url
-		idx := strings.Index(lines[0], `x-tvg-url="`)
-		if idx != -1 {
-			start := idx + 11
-			end := strings.Index(lines[0][start:], `"`)
-			if end != -1 {
-				epgUrl = lines[0][start : start+end]
-			}
+		if len(lines) > 0 && strings.HasPrefix(lines[0], "#EXTM3U") {
+		if m := epgUrlRe.FindStringSubmatch(lines[0]); len(m) > 1 {
+			epgUrl = m[1]
 		}
 	}
 
