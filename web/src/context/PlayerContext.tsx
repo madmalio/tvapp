@@ -146,10 +146,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const expandMiniPlayer = useCallback(() => {
+    const currentPath = window.location.pathname;
+    const fromPath = (currentPath !== `/player/${activeChannel?.id}` && currentPath !== `/cameras/${activeCamera?.id}`) 
+                     ? currentPath 
+                     : '/channels';
+
     if (activeChannel) {
-      navigate(`/player/${activeChannel.id}`);
+      navigate(`/player/${activeChannel.id}`, { state: { from: fromPath } });
     } else if (activeCamera) {
-      navigate(`/cameras/${activeCamera.id}`);
+      navigate(`/cameras/${activeCamera.id}`, { state: { from: fromPath } });
     }
     setIsMiniPlayerOpen(false);
   }, [activeChannel, activeCamera, navigate]);
@@ -191,3 +196,4 @@ export function usePlayer() {
   }
   return context;
 }
+
