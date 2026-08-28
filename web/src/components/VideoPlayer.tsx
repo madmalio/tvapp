@@ -159,6 +159,21 @@ function PinnedCameraOverlay({
   );
 }
 
+function BackgroundCameraPreloader({ camera }: { camera: CameraInfo }) {
+  useEffect(() => {
+    const subId = `preloader-${camera.id}`;
+    acquireCameraStream(
+      camera as any,
+      subId,
+      () => {}, 
+      () => {}
+    );
+    return () => releaseCameraStream(camera.id, subId);
+  }, [camera]);
+  return null;
+}
+
+
 export default function VideoPlayer() {
   const { channelId } = useParams<{ channelId: string }>();
   const navigate = useNavigate();
@@ -178,6 +193,11 @@ export default function VideoPlayer() {
   const [showCameraMenu, setShowCameraMenu] = useState(false);
   const { data: sources } = useApi<CameraInfo[]>("/api/sources");
   const rtspCameras = useMemo(() => sources?.filter(s => s.type === "rtsp") || [], [sources]);
+
+  const [lastPipCamera, setLastPipCamera] = useState<CameraInfo | null>(null);
+  useEffect(() => {
+    if (pipCamera) setLastPipCamera(pipCamera);
+  }, [pipCamera]);
   
   const [isPlaying, setIsPlaying] = useState(true);
   const [volume, setVolume] = useState(() => {
@@ -639,6 +659,9 @@ export default function VideoPlayer() {
       />
 
       {/* Pinned Security Camera PiP Overlay */}
+      {cameraPipEnabled && !pipCamera && rtspCameras.length > 0 && (
+        <BackgroundCameraPreloader camera={lastPipCamera || rtspCameras[0]} />
+      )}
       {pipCamera && (
         <PinnedCameraOverlay
           camera={pipCamera}
