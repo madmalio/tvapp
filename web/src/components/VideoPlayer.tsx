@@ -22,6 +22,7 @@ import { useSpeedTest, StreamQuality } from "../hooks/useSpeedTest";
 import { lockToLandscape, unlockScreenOrientation } from "../lib/orientation";
 import { usePlayer, ChannelInfo, CameraInfo } from "../context/PlayerContext";
 import { useApi } from "../hooks/useApi";
+import { acquireCameraStream, releaseCameraStream, getActiveStream, CameraState } from "./Cameras";
 
 const CATEGORIES = ['All', 'Movies', 'News', 'Sports', 'Kids', 'Entertainment', 'Docs & Learning', 'Music', 'Local', 'Other'];
 
@@ -63,73 +64,45 @@ function PinnedCameraOverlay({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [showMenu, setShowMenu] = useState(false);
+  const [cameraState, setCameraState] = useState<CameraState>("connecting");
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
+    const subId = `pip-${camera.id}`;;
     let isMounted = true;
-    const mediaStream = new MediaStream();
-    const pc = new RTCPeerConnection({ iceServers: [] });
 
-    pc.addTransceiver("video", { direction: "recvonly" });
-    pc.addTransceiver("audio", { direction: "recvonly" });
-
-    pc.ontrack = (event) => {
-      mediaStream.addTrack(event.track);
-      if (video && isMounted) {
-        video.srcObject = mediaStream;
-        video.muted = true;
-        video.play().catch(() => {});
-      }
-    };
-
-    let streamId = "";
-    async function init() {
-      try {
-        const startRes = await fetch(getApiUrl("/api/stream/start"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: camera.url, tuner_type: "rtsp", quality: "720p_std" }),
-        });
-        const startData = await startRes.json();
-        streamId = startData.id;
-
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-
-        let connected = false;
-        let attempts = 0;
-        while (!connected && attempts < 20 && isMounted) {
-          attempts++;
-          try {
-            const res = await fetch(`http://${window.location.hostname}:8889/${streamId}/whep`, {
-              method: "POST",
-              headers: { "Content-Type": "application/sdp" },
-              body: offer.sdp,
-            });
-            if (res.ok) {
-              const answerSdp = await res.text();
-              await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: answerSdp }));
-              connected = true;
-              break;
-            }
-          } catch {}
-          await new Promise((r) => setTimeout(r, 300));
-        }
-      } catch (err) {
-        console.warn("[PinnedCamera] Connection error:", err);
-      }
+    // Check if stream already exists in memory
+    const cached = getActiveStream(camera.id);
+    if (cached && cached.mediaStream.getTracks().length > 0) {
+      video.srcObject = cached.mediaStream;
+      video.muted = true;
+      video.play().then(() => {
+        if (isMounted) setCameraState("connected");
+      }).catch(() => {});
     }
 
-    init();
+    acquireCameraStream(
+      camera as any,
+      subId,
+      (stream) => {
+        if (isMounted && video) {
+          video.srcObject = stream;
+          video.muted = true;
+          video.play().then(() => {
+            if (isMounted) setCameraState("connected");
+          }).catch(() => {});
+        }
+      },
+      (state) => {
+        if (isMounted) setCameraState(state);
+      }
+    );
 
     return () => {
       isMounted = false;
-      pc.close();
-      if (streamId) {
-        fetch(getApiUrl(`/api/stream/stop/${streamId}`), { method: "DELETE" }).catch(() => {});
-      }
+      releaseCameraStream(camera.id, subId);
     };
   }, [camera]);
 
@@ -161,13 +134,15 @@ function PinnedCameraOverlay({
         
         {/* Live Badge */}
         <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-sm self-start">
-          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-          <span className="text-[9px] font-bold text-white tracking-wider">LIVE</span>
+          <span className={`w-1.5 h-1.5 rounded-full ${cameraState === 'connected' ? 'bg-red-500 animate-pulse' : cameraState === 'connecting' ? 'bg-yellow-500 animate-pulse' : 'bg-neutral-500'}`} />
+          <span className="text-[9px] font-bold text-white tracking-wider">
+            {cameraState === 'connected' ? 'LIVE' : cameraState === 'connecting' ? 'CONNECT' : 'OFFLINE'}
+          </span>
         </div>
       </div>
 
       {showMenu && (
-        <div className="absolute inset-0 bg-neutral-950/95 p-2 overflow-y-auto z-40 flex flex-col gap-1">
+        <div className="absolute inset-0 bg-neutral-950/95 p-2 overflow-y-auto custom-scrollbar z-40 flex flex-col gap-1">
           <div className="text-[11px] font-bold text-neutral-400 mb-1">Select Camera</div>
           {allCameras.map((c) => (
             <button
