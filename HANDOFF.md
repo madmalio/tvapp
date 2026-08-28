@@ -1,4 +1,4 @@
-# tvapp — Handoff Document
+# tvapp - Handoff Document
 
 ## Project Overview
 
@@ -24,10 +24,14 @@ EPG (Live TV Guide) and Channel List improvements:
   - Memoized `ChannelCarousel` to prevent cascading redraws on hover.
   - EPG JSON is fetched *once* on load and cached in a state array, preventing network waterfall stalls during rapid hovering.
 - EPG Mobile UI: The EPG grid automatically centers the red current-time playhead upon mounting, and programs feature mobile-only sticky titles.
+- **Embedded EPG Parsing**: The `m3u.go` parser was updated to extract embedded `url-tvg` attributes in playlists, and `xmltv.go` safely decompresses `.gz` XMLTV files via magic byte inspection (`0x1f 0x8b`), bypassing missing `Content-Encoding: gzip` headers. 
+- **Auto-Categorization**: Channels missing explicit EPG mapping utilize aggressive regex heuristics (`mapCategory`) in the frontend to reliably sort into standard buckets (Movies, Sports, News, etc.). Channels with absolutely no data generate 24-hour dummy blocks so they remain clickable in the UI.
 
 Video Player UX Improvements:
-- **Abandoned Security Camera PiP**: The experimental overlaid Camera PiP feature was removed entirely due to stability issues per user request.
+- **Security Camera PiP Overlay**: Displays RTSP cameras as a floating overlay on top of broadcasts. Note: *This feature, along with its UI toggles in the VideoPlayer and Settings, is explicitly hidden on mobile devices* to preserve screen space.
 - **Native OS PiP Adjustments**: Native PiP is enabled for desktop mode. A `leavepictureinpicture` handler was added to immediately issue a `play()` command within 10ms of closing the PiP window via the native "X" button to circumvent the browser's hardcoded auto-pause.
+- **Streaming Quality Automations**: The frontend performs a speed test via `useSpeedTest.ts` to automatically select the best stream quality. Manual overrides by the user are now saved in `sessionStorage` rather than `localStorage`, ensuring the app naturally reassesses the connection quality on every fresh app load.
+- **Mobile Menu Interactions**: Fixed iOS double-tap bugs where fixed absolute positioning elements (Quality toggle, Camera PiP toggle) failed to open.
 
 **MediaMTX Live Streaming Architecture (HDHomeRun & Custom Streams)**:
 - Migrated away from disk-based `.ts` chunk generation which caused severe disk I/O bottlenecks and stuttering.
@@ -41,17 +45,17 @@ Video Player UX Improvements:
 
 ```
 User clicks channel
-  → GET /api/channels/{id}  (lazy M3U refresh if >15 min old)
-  → hls.js loads /api/proxy?url=<channel_stream_url>
-    → Proxy fetches master playlist from PlutoTV CDN
-    → Resolves best variant (highest bandwidth)
-    → Caches variant URL with media-sequence tracking
-    → Rewrites playlist URLs through /api/proxy
-    → Returns rewritten playlist to browser
-  → Browser fetches segments and key files through proxy
-    → Proxy adds Origin: http://pluto.tv, Referer: http://pluto.tv/
-    → Shared cookie jar preserves CDN cookies across requests
-  → hls.js decrypts AES-128 segments and plays
+    GET /api/channels/{id}  (lazy M3U refresh if >15 min old)
+    hls.js loads /api/proxy?url=<channel_stream_url>
+      Proxy fetches master playlist from PlutoTV CDN
+      Resolves best variant (highest bandwidth)
+      Caches variant URL with media-sequence tracking
+      Rewrites playlist URLs through /api/proxy
+      Returns rewritten playlist to browser
+    Browser fetches segments and key files through proxy
+      Proxy adds Origin: http://pluto.tv, Referer: http://pluto.tv/
+      Shared cookie jar preserves CDN cookies across requests
+    hls.js decrypts AES-128 segments and plays
 ```
 
 ### Server Deployment
@@ -85,21 +89,12 @@ scp .\bin\tvapp-linux mark@192.168.4.143:~/tvapp/tvapp
 
 - **Do Not Replace MediaMTX with go2rtc**: MediaMTX is our unified streaming server (handling RTSP ingestion from FFmpeg, WebRTC on `:8889`, and LL-HLS on `:8888`). A previous attempt to introduce `go2rtc` added unnecessary complexity and caused stream instability. WebRTC via MediaMTX is working well with FFmpeg audio transcoding (`pcm_mulaw`).
 - **Native OS PiP Auto-Pause**: The browser inherently fires a `pause` command when exiting PiP via the 'X' button. We successfully circumvent this using a 10ms `setTimeout()` inside `leavepictureinpicture`, but there is still a fractional visual pause as the browser halts and we immediately force it back into a playing state.
-
-## Outstanding Tasks
-
-1. **Mobile Sticky Titles Issue (HIGH PRIORITY)**: 
-   - The user noted that "there is an issue with the sticky titles but i we will pick back up tomorrow." In `EpgGrid.tsx`, `max-md:sticky max-md:left-0` was implemented to keep program titles visible on mobile during horizontal scrolling, and `overflow-hidden` was removed from the scrolling row so sticky could take effect. The exact issue needs further evaluation in the next session (perhaps sticky constraints within absolute positioning, z-indexing, or background clipping).
-2. **RTSP Camera Bugs**: 
-   - A new dedicated `Cameras.tsx` dashboard was built to display RTSP security cameras via MediaMTX, decoupling them from the main TV channels. However, there are two major issues the next agent MUST fix:
-     - The RTSP streams are still failing to play in the `Cameras.tsx` grid. The frontend attempts to load them via `/api/proxy?url=http://127.0.0.1:8888/{cam_id}/index.m3u8` to bypass firewall ports, but MediaMTX or the `proxyStreamHandler` is failing to serve the stream correctly.
-     - The ghost RTSP cameras are STILL showing up in the `ChannelList.tsx` and `EpgGrid.tsx` pages. The backend has an aggressive SQLite cleanup script in `schema.go` `Init()`, but it doesn't seem to be working, or the frontend/backend is still incorrectly mapping the sources.
-3. **Distracting "Red Pill" UI**: When switching channels, a red "Starting stream..." pill flashes on the screen which the user finds distracting. Needs to be removed or smoothed out.
-4. **Quality Selector Settings**: Ensure the UI quality selector correctly reflects and respects the bitrate/quality set by the automated speedtest.
+- **Accidental Category Resets**: Mobile users frequently tap the active Tuner Pill which, without a strict check (`activeSourceId !== src.id`), resets their category filtering to "All". This was patched today but must be kept in mind for new UI elements.
 
 ## Future Work
 
-1. **Favorites** — The `favorites` table exists in the schema but no UI
-2. **Channel search** — Text search for channels/programs
-3. **DVR / Recording** — Hook up future program clicks in the modal to a scheduled recording service
-4. **Native HLS on Safari** — Detect Safari and use `<video src>` directly (no proxy needed, bypasses CORS)
+1. **Mobile Sticky Titles Issue**: The user previously noted that "there is an issue with the sticky titles but i we will pick back up tomorrow." In `EpgGrid.tsx`, `max-md:sticky max-md:left-0` was implemented to keep program titles visible on mobile during horizontal scrolling.
+2. **Favorites** - The `favorites` table exists in the schema but no UI
+3. **Channel search** - Text search for channels/programs
+4. **DVR / Recording** - Hook up future program clicks in the modal to a scheduled recording service
+5. **Native HLS on Safari** - Detect Safari and use `<video src>` directly (no proxy needed, bypasses CORS)

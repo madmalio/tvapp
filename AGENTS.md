@@ -1,4 +1,4 @@
-# tvapp — Agent Instructions
+# tvapp - Agent Instructions
 
 ## Build
 
@@ -27,7 +27,7 @@ go build -o bin\tvapp.exe .\cmd\server\
 # Binary (uses embedded frontend)
 .\bin\tvapp.exe
 
-# Dev (no embedded frontend — uses Vite dev server on :5173 proxied to :8080)
+# Dev (no embedded frontend - uses Vite dev server on :5173 proxied to :8080)
 go run .\cmd\server\
 # In another terminal:
 npx --prefix web vite
@@ -93,7 +93,7 @@ tvapp/
 - **HLS proxying** happens through `/api/proxy` endpoint (playlist-only proxy + segment proxying)
 - **FFmpeg** is used for non-HLS streams via `/api/stream/start` (kept as fallback)
 - **AES-128 keys** are proxied through `/api/proxy` with `Origin: http://pluto.tv`
-- **M3U refresh** is lazy — re-fetches every 15 min on channel click
+- **M3U refresh** is lazy - re-fetches every 15 min on channel click
 - **Variant cache** stores resolved variant URLs to skip master re-resolution
 - **Auto-recovery** on hls.js fatal errors (3 attempts, 2s delay, live edge resume)
 - **Player State** resets `isAtLiveEdge` and `isPlaying` correctly on channel switches.
@@ -104,10 +104,14 @@ tvapp/
 - **HDHomeRun EPG Integration**: Uses SiliconDust's XMLTV API (`api.hdhomerun.com/api/xmltv`). Requires `User-Agent` and `Accept-Encoding: gzip` headers. Timestamps are parsed from local time and strictly converted to UTC (`.UTC().Format(time.RFC3339)`) before SQLite insertion to prevent timezone mismatch errors on the frontend.
 - **EPG Category Mapping** normalizes messy M3U `group_title` values into 9 fixed buckets (Movies, News, Sports, etc.) on the frontend.
 - **Hero Fallbacks**: The channel list Hero defaults to the first available channel in the current category. Posters fall back to the channel `logo_url` if the EPG program lacks an `<icon src>`.
+- **GZIP Payloads**: EPG data from URLs is decompressed using magic byte inspection (`0x1f 0x8b`), avoiding issues with missing `Content-Encoding: gzip` headers.
+- **M3U Parsing**: Extracts both `x-tvg-url` and `url-tvg` via regex from `#EXTM3U`. EPG linking falls back to case-insensitive name matching if `tvg-id` is absent.
+- **Mobile Adjustments**: PiP functionality and related settings are explicitly hidden on mobile layouts via Tailwind (`hidden sm:block`) to save space. Navigation avoids accidentally resetting states (like category going back to "All") by utilizing strict change-checks on tuner pills (`activeSourceId !== src.id`).
+- **Streaming Quality Override**: Manual quality overrides are saved in `sessionStorage` rather than `localStorage`, meaning the automatic speed test will appropriately re-assess the default quality on every new session/app load.
 
 ## Known PlutoTV Constraints
 
-- CDN returns `Access-Control-Allow-Origin: http://pluto.tv` → proxy must set `Origin: http://pluto.tv`
+- CDN returns `Access-Control-Allow-Origin: http://pluto.tv` -> proxy must set `Origin: http://pluto.tv`
 - AES-128 key files must be 16 bytes; proxy returns them as-is from CDN
 - Session tokens rotate unpredictably (2-10 min); variant cache stall detection + lazy M3U refresh handle this
 - `#EXT-X-DISCONTINUITY` triggers proxy to re-resolve from master

@@ -764,10 +764,10 @@ export default function Settings() {
                   </div>
                 </div>
 
-                <div className="mt-6 pt-5 border-t border-neutral-700/50 space-y-4">
-                  <h4 className="text-xs sm:text-sm font-semibold text-neutral-300 uppercase tracking-wider">
-                    Picture-in-Picture (PiP) Options
-                  </h4>
+                  <div className="hidden sm:block mt-6 pt-5 border-t border-neutral-700/50 space-y-4">
+                    <h4 className="text-xs sm:text-sm font-semibold text-neutral-300 uppercase tracking-wider">
+                      Picture-in-Picture (PiP) Options
+                    </h4>
 
                   {/* In-App MiniPlayer Toggle */}
                   <div className="flex items-center justify-between p-3 sm:p-4 rounded-xl bg-neutral-900/60 border border-neutral-700/50">
