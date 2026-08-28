@@ -386,8 +386,14 @@ export default function VideoPlayer() {
       streamSessionIdRef.current = null;
     }
 
-    const isMusic = mapCategory(channel.group_title || "", channel.name || "") === "Music";
-    const shouldRunFFmpeg = channel.tuner_type === "hdhomerun" || isMusic;
+    const category = mapCategory(channel.group_title || "", channel.name || "");
+    const isMusic = category === "Music";
+    const isNews = category === "News";
+    const isSports = category === "Sports";
+    
+    // FFmpeg cleanly handles the heavy ad-insertion discontinuities (#EXT-X-DISCONTINUITY) 
+    // that plague PlutoTV News/Sports, and fixes audio drift on Music channels.
+    const shouldRunFFmpeg = channel.tuner_type === "hdhomerun" || isMusic || isNews || isSports;
 
     if (shouldRunFFmpeg) {
       setStatus("Starting stream...");
