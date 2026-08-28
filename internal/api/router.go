@@ -147,7 +147,7 @@ func refreshChannelIfStale(id int, force bool) (*db.ChannelRow, error) {
 		return current, nil
 	}
 
-	channels, err := iptv.ParseM3U(source.URL)
+	channels, _, err := iptv.ParseM3U(source.URL)
 	if err != nil {
 		log.Printf("[m3u] refresh failed for source %d: %v, using stored data", source.ID, err)
 		return current, nil

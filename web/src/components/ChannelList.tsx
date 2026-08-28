@@ -29,20 +29,19 @@ type EPGEntry = {
 const CATEGORIES = ['All', 'Movies', 'News', 'Sports', 'Kids', 'Entertainment', 'Docs & Learning', 'Music', 'Local', 'Other'];
 
 function mapCategory(rawGroup: string, channelName: string = ""): string {
-  if (channelName) {
-    const lowerName = channelName.toLowerCase();
-    if (lowerName.match(/nbc|abc|cbs|fox|cw|pbs/)) return 'Local';
-  }
-  if (!rawGroup) return 'Other';
-  const lower = rawGroup.toLowerCase();
-  if (lower.match(/movie|cinema|film|box office/)) return 'Movies';
-  if (lower.match(/news|weather|breaking|journal/)) return 'News';
-  if (lower.match(/sport|espn|nfl|nba|mlb|nhl|wwe|racing/)) return 'Sports';
-  if (lower.match(/kid|child|family|animation|cartoon|disney|nick/)) return 'Kids';
-  if (lower.match(/comedy|drama|reality|tv show|sitcom|entertainment/)) return 'Entertainment';
-  if (lower.match(/doc|history|science|discovery|nature|learning/)) return 'Docs & Learning';
-  if (lower.match(/music|mtv|vh1|concert|radio/)) return 'Music';
-  if (lower.match(/local|us|uk|region|city/)) return 'Local';
+  const lowerGroup = (rawGroup || "").toLowerCase();
+  const lowerName = (channelName || "").toLowerCase();
+  const target = lowerGroup ? `${lowerGroup} ${lowerName}` : lowerName;
+
+  if (target.match(/movie|cinema|film|box office|hbo|cinemax|starz|tcm|showtime|amc|paramount/)) return 'Movies';
+  if (target.match(/news|weather|breaking|journal|cnn|fox news|msnbc|bbc|bloomberg|cnbc/)) return 'News';
+  if (target.match(/sport|espn|nfl|nba|mlb|nhl|wwe|racing|golf|tennis|nascar|ufc|boxing/)) return 'Sports';
+  if (target.match(/kid|child|family|animation|cartoon|disney|nick|pbs kids/)) return 'Kids';
+  if (target.match(/music|mtv|vh1|concert|radio|vevo/)) return 'Music';
+  if (target.match(/doc|history|science|discovery|nature|learning|animal planet|nat geo/)) return 'Docs & Learning';
+  if (target.match(/nbc|abc|cbs|fox|cw|pbs|local|us|uk|region|city/)) return 'Local';
+  if (target.match(/comedy|drama|reality|tv show|sitcom|entertainment/)) return 'Entertainment';
+  
   return 'Other';
 }
 

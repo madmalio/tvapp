@@ -1,0 +1,498 @@
+commit 2c29a4009baa6a7851574471da6cf1a6afcbaa44
+Author: madmalio <madmalio82@gmail.com>
+Date:   Thu Aug 27 17:36:47 2026 -0600
+
+    chore: Update PiP logic, EPG mobile sticky titles, and remove Camera PiP
+
+diff --git a/web/src/components/Settings.tsx b/web/src/components/Settings.tsx
+index 436fda3..365bea8 100644
+--- a/web/src/components/Settings.tsx
++++ b/web/src/components/Settings.tsx
+@@ -19,6 +19,7 @@ import {
+ } from "lucide-react";
+ import { getApiUrl, clearApiCache } from "../lib/api";
+ import { useApi } from "../hooks/useApi";
++import { usePlayer } from "../context/PlayerContext";
+ 
+ type Tab = 'iptv' | 'server' | 'rtsp' | 'dvr' | 'preferences';
+ type Source = { id: number; name: string; type: string; url: string; epg_url: string; };
+@@ -57,6 +58,11 @@ function formatRtspSummary(url: string): string {
+ export default function Settings() {
+   const [activeTab, setActiveTab] = useState<Tab>('iptv');
+   
++  const { 
++    miniPlayerEnabled, 
++    setMiniPlayerEnabled
++  } = usePlayer();
++  
+   // IPTV Multi-Source State
+   const { data: sources, refetch: refetchSources } = useApi<Source[]>('/api/sources');
+   const [loading, setLoading] = useState(false);
+@@ -755,11 +761,39 @@ export default function Settings() {
+                     <div className="text-right text-[11px] sm:text-xs text-neutral-400 mt-1">{defaultVolume}%</div>
+                   </div>
+                 </div>
+-                
+-                <div className="mt-5 sm:mt-6 pt-4 sm:pt-6 border-t border-neutral-700/50 flex justify-end">
+-                  <button className="bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-medium px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg transition-all cursor-pointer shadow-md">
+-                    Save Changes
+-                  </button>
++
++                <div className="mt-6 pt-5 border-t border-neutral-700/50 space-y-4">
++                  <h4 className="text-xs sm:text-sm font-semibold text-neutral-300 uppercase tracking-wider">
++                    Picture-in-Picture (PiP) Options
++                  </h4>
++
++                  {/* In-App MiniPlayer Toggle */}
++                  <div className="flex items-center justify-between p-3 sm:p-4 rounded-xl bg-neutral-900/60 border border-neutral-700/50">
++                    <div className="pr-4">
++                      <div className="text-xs sm:text-sm font-medium text-white">In-App MiniPlayer</div>
++                      <div className="text-[11px] sm:text-xs text-neutral-400 mt-0.5">
++                        Dock stream into a floating corner mini-player when browsing channels or the TV guide.
++                      </div>
++                    </div>
++                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
++                      <input
++                        type="checkbox"
++                        checked={miniPlayerEnabled}
++                        onChange={(e) => {
++                          setMiniPlayerEnabled(e.target.checked);
++                          addToast({
++                            type: 'success',
++                            title: e.target.checked ? 'MiniPlayer Enabled' : 'MiniPlayer Disabled',
++                            message: e.target.checked 
++                              ? 'Streams will dock into a floating mini-player upon leaving player.' 
++                              : 'Streams will stop when exiting full player.'
++                          });
++                        }}
++                        className="sr-only peer"
++                      />
++                      <div className="w-11 h-6 bg-neutral-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
++                    </label>
++                  </div>
+                 </div>
+               </div>
+             </div>
+diff --git a/web/src/components/VideoPlayer.tsx b/web/src/components/VideoPlayer.tsx
+index 531d505..65d1cc0 100644
+--- a/web/src/components/VideoPlayer.tsx
++++ b/web/src/components/VideoPlayer.tsx
+@@ -12,15 +12,13 @@ import {
+   Minimize, 
+   History, 
+   Settings,
+-  PictureInPicture2,
+-  Video,
+-  Maximize2
++  PictureInPicture2
+ } from "lucide-react";
+ import Hls from "hls.js";
+ import { getApiUrl, fetchWithCache } from "../lib/api";
+ import { useSpeedTest, StreamQuality } from "../hooks/useSpeedTest";
+ import { lockToLandscape, unlockScreenOrientation } from "../lib/orientation";
+-import { usePlayer, CameraInfo, ChannelInfo } from "../context/PlayerContext";
++import { usePlayer, ChannelInfo } from "../context/PlayerContext";
+ import { useApi } from "../hooks/useApi";
+ 
+ const CATEGORIES = ['All', 'Movies', 'News', 'Sports', 'Kids', 'Entertainment', 'Docs & Learning', 'Music', 'Local', 'Other'];
+@@ -45,145 +43,6 @@ function mapCategory(rawGroup: string, channelName: string = ""): string {
+ 
+ const MAX_RELOADS = 3;
+ 
+-// =========================================================
+-// Pinned Camera PiP Overlay inside TV Player
+-// =========================================================
+-function PinnedCameraOverlay({
+-  camera,
+-  allCameras,
+-  onSwitchCamera,
+-  onClose,
+-  onExpand,
+-}: {
+-  camera: CameraInfo;
+-  allCameras: CameraInfo[];
+-  onSwitchCamera: (cam: CameraInfo) => void;
+-  onClose: () => void;
+-  onExpand: () => void;
+-}) {
+-  const videoRef = useRef<HTMLVideoElement>(null);
+-  const [showMenu, setShowMenu] = useState(false);
+-
+-  useEffect(() => {
+-    const video = videoRef.current;
+-    if (!video) return;
+-
+-    let isMounted = true;
+-    const mediaStream = new MediaStream();
+-    const pc = new RTCPeerConnection({ iceServers: [] });
+-
+-    pc.addTransceiver("video", { direction: "recvonly" });
+-    pc.addTransceiver("audio", { direction: "recvonly" });
+-
+-    pc.ontrack = (event) => {
+-      mediaStream.addTrack(event.track);
+-      if (video && isMounted) {
+-        video.srcObject = mediaStream;
+-        video.muted = true;
+-        video.play().catch(() => {});
+-      }
+-    };
+-
+-    let streamId = "";
+-    async function init() {
+-      try {
+-        const startRes = await fetch(getApiUrl("/api/stream/start"), {
+-          method: "POST",
+-          headers: { "Content-Type": "application/json" },
+-          body: JSON.stringify({ url: camera.url, tuner_type: "rtsp", quality: "720p_std" }),
+-        });
+-        const startData = await startRes.json();
+-        streamId = startData.id;
+-
+-        const offer = await pc.createOffer();
+-        await pc.setLocalDescription(offer);
+-
+-        let connected = false;
+-        let attempts = 0;
+-        while (!connected && attempts < 20 && isMounted) {
+-          attempts++;
+-          try {
+-            const res = await fetch(`http://${window.location.hostname}:8889/${streamId}/whep`, {
+-              method: "POST",
+-              headers: { "Content-Type": "application/sdp" },
+-              body: offer.sdp,
+-            });
+-            if (res.ok) {
+-              const answerSdp = await res.text();
+-              await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: answerSdp }));
+-              connected = true;
+-              break;
+-            }
+-          } catch {}
+-          await new Promise((r) => setTimeout(r, 300));
+-        }
+-      } catch (err) {
+-        console.warn("[PinnedCamera] Connection error:", err);
+-      }
+-    }
+-
+-    init();
+-
+-    return () => {
+-      isMounted = false;
+-      pc.close();
+-      if (streamId) {
+-        fetch(getApiUrl(`/api/stream/stop/${streamId}`), { method: "DELETE" }).catch(() => {});
+-      }
+-    };
+-  }, [camera]);
+-
+-  return (
+-    <div
+-      className="absolute top-16 right-4 sm:top-20 sm:right-8 z-30 w-52 sm:w-72 aspect-video rounded-xl overflow-hidden shadow-2xl border-2 border-blue-500/80 bg-black group/pin select-none transition-all"
+-      onClick={(e) => e.stopPropagation()}
+-    >
+-      <video ref={videoRef} className="w-full h-full object-contain bg-black pointer-events-none" autoPlay playsInline muted />
+-      
+-      {/* Header Bar */}
+-      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/80 opacity-0 group-hover/pin:opacity-100 transition-opacity p-2 flex flex-col justify-between">
+-        <div className="flex items-center justify-between gap-1">
+-          <span className="text-[11px] sm:text-xs font-bold text-white truncate drop-shadow">{camera.name}</span>
+-          <div className="flex items-center gap-1">
+-            {allCameras.length > 1 && (
+-              <button onClick={() => setShowMenu(!showMenu)} className="p-1 rounded bg-black/60 hover:bg-neutral-800 text-white" title="Switch Camera">
+-                <Video className="w-3.5 h-3.5" />
+-              </button>
+-            )}
+-            <button onClick={onExpand} className="p-1 rounded bg-black/60 hover:bg-neutral-800 text-white" title="Open Full Camera">
+-              <Maximize2 className="w-3.5 h-3.5" />
+-            </button>
+-            <button onClick={onClose} className="p-1 rounded bg-black/60 hover:bg-red-900 text-red-400" title="Close Camera PiP">
+-              <X className="w-3.5 h-3.5" />
+-            </button>
+-          </div>
+-        </div>
+-        
+-        {/* Live Badge */}
+-        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-sm self-start">
+-          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+-          <span className="text-[9px] font-bold text-white tracking-wider">LIVE</span>
+-        </div>
+-      </div>
+-
+-      {showMenu && (
+-        <div className="absolute inset-0 bg-neutral-950/95 p-2 overflow-y-auto z-40 flex flex-col gap-1">
+-          <div className="text-[11px] font-bold text-neutral-400 mb-1">Select Camera</div>
+-          {allCameras.map((c) => (
+-            <button
+-              key={c.id}
+-              onClick={() => { onSwitchCamera(c); setShowMenu(false); }}
+-              className={`text-left text-xs p-1.5 rounded transition-colors ${c.id === camera.id ? 'bg-blue-600 text-white' : 'text-neutral-300 hover:bg-neutral-800'}`}
+-            >
+-              {c.name}
+-            </button>
+-          ))}
+-        </div>
+-      )}
+-    </div>
+-  );
+-}
+-
+ export default function VideoPlayer() {
+   const { channelId } = useParams<{ channelId: string }>();
+   const navigate = useNavigate();
+@@ -200,11 +59,7 @@ export default function VideoPlayer() {
+   const streamSessionIdRef = useRef<string | null>(null);
+   
+   const { playChannel } = usePlayer();
+-  const [pipCamera, setPipCamera] = useState<CameraInfo | null>(null);
+-  const [showCameraMenu, setShowCameraMenu] = useState(false);
+-  const { data: sources } = useApi<CameraInfo[]>("/api/sources");
+-  const rtspCameras = useMemo(() => sources?.filter(s => s.type === "rtsp") || [], [sources]);
+-
++  
+   const [isPlaying, setIsPlaying] = useState(true);
+   const [volume, setVolume] = useState(() => {
+     const saved = localStorage.getItem('tvapp_volume');
+@@ -229,6 +84,19 @@ export default function VideoPlayer() {
+   const [showOverlay, setShowOverlay] = useState(true);
+   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+ 
++  const [isMobile, setIsMobile] = useState(() => {
++    if (typeof window === "undefined") return false;
++    return window.innerWidth < 768 || /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
++  });
++
++  useEffect(() => {
++    const checkMobile = () => {
++      setIsMobile(window.innerWidth < 768 || /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
++    };
++    window.addEventListener("resize", checkMobile);
++    return () => window.removeEventListener("resize", checkMobile);
++  }, []);
++
+   const toggleNativePip = useCallback(async (e: React.MouseEvent) => {
+     e.stopPropagation();
+     const video = videoRef.current;
+@@ -248,6 +116,40 @@ export default function VideoPlayer() {
+     }
+   }, []);
+ 
++  useEffect(() => {
++    const video = videoRef.current;
++    if (!video) return;
++
++    const handleLeavePiP = () => {
++      if (isPlaying) {
++        // Prevent browser from automatically pausing when closing PiP via 'X'
++        // We use a small timeout because the browser often issues the pause() command AFTER this event
++        setTimeout(() => {
++          const v = videoRef.current;
++          if (v && v.paused) {
++            v.play().then(() => {
++              setIsPlaying(true);
++              if (isAtLiveEdge) {
++                let edge: number | null = null;
++                if (hlsRef.current) {
++                  edge = hlsRef.current.liveSyncPosition;
++                } else if (v.seekable && v.seekable.length > 0) {
++                  edge = v.seekable.end(v.seekable.length - 1);
++                }
++                if (edge !== null) {
++                  v.currentTime = edge;
++                }
++              }
++            }).catch(() => {});
++          }
++        }, 10);
++      }
++    };
++    
++    video.addEventListener('leavepictureinpicture', handleLeavePiP);
++    return () => video.removeEventListener('leavepictureinpicture', handleLeavePiP);
++  }, [isPlaying, isAtLiveEdge]);
++
+   const handleMouseMove = useCallback(() => {
+     setShowOverlay(true);
+     if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+@@ -617,17 +519,6 @@ export default function VideoPlayer() {
+         }}
+       />
+ 
+-      {/* Pinned Security Camera PiP Overlay */}
+-      {pipCamera && (
+-        <PinnedCameraOverlay
+-          camera={pipCamera}
+-          allCameras={rtspCameras}
+-          onSwitchCamera={(c) => setPipCamera(c)}
+-          onClose={() => setPipCamera(null)}
+-          onExpand={() => navigate(`/cameras/${pipCamera.id}`)}
+-        />
+-      )}
+-
+       {/* Status Overlays */}
+       {status === "Loading..." || status === "Recovering..." || status === "Starting stream..." ? (
+         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20 bg-black">
+@@ -650,12 +541,12 @@ export default function VideoPlayer() {
+           showOverlay ? "opacity-100" : "opacity-0"
+         }`}
+       >
+-        <div className="h-36 sm:h-48 bg-gradient-to-b from-black/90 via-black/40 to-transparent flex items-start p-4 sm:p-6 md:p-8">
++        <div className="h-auto min-h-[4.5rem] sm:h-44 bg-gradient-to-b from-black/90 via-black/40 to-transparent flex items-start p-3 sm:p-6 md:p-8 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
+           {channel && (
+-            <div className="pointer-events-auto flex items-center gap-2 sm:gap-4" onClick={(e) => e.stopPropagation()}>
++            <div className="pointer-events-auto flex items-center gap-2 sm:gap-4 max-w-full min-w-0" onClick={(e) => e.stopPropagation()}>
+               <button 
+                 onClick={(e) => { e.stopPropagation(); navigate(backUrl); }}
+-                className="p-2 sm:p-3 bg-neutral-900/50 hover:bg-neutral-800 text-white rounded-full backdrop-blur-sm transition-colors flex items-center justify-center mr-1 sm:mr-2 shadow-lg cursor-pointer"
++                className="p-2 sm:p-3 bg-neutral-900/50 hover:bg-neutral-800 text-white rounded-full backdrop-blur-sm transition-colors flex items-center justify-center shrink-0 shadow-lg cursor-pointer"
+                 title="Exit Player"
+               >
+                 <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6" />
+@@ -664,11 +555,11 @@ export default function VideoPlayer() {
+                 <img 
+                   src={channel.logo_url} 
+                   alt={channel.name}
+-                  className="h-8 sm:h-12 md:h-14 object-contain drop-shadow-xl"
++                  className="h-7 sm:h-12 md:h-14 object-contain drop-shadow-xl shrink-0"
+                 />
+               )}
+-              <div>
+-                <h2 className="text-xl sm:text-2xl md:text-4xl font-bold text-white tracking-tight drop-shadow-lg">
++              <div className="min-w-0">
++                <h2 className="text-base sm:text-2xl md:text-4xl font-bold text-white tracking-tight drop-shadow-lg truncate">
+                   {programTitle || channel.name}
+                 </h2>
+               </div>
+@@ -677,31 +568,31 @@ export default function VideoPlayer() {
+         </div>
+ 
+         {/* Custom Bottom Controls */}
+-        <div className="h-36 sm:h-48 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex items-end p-4 sm:p-6 md:p-8">
+-          <div className="w-full flex items-center justify-between pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+-            <div className="flex items-center gap-3 sm:gap-4 md:gap-6">
++        <div className="h-auto min-h-[4.5rem] sm:h-44 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex items-end p-3 sm:p-6 md:p-8 pb-[max(0.75rem,env(safe-area-inset-bottom))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
++          <div className="w-full flex items-center justify-between gap-1 sm:gap-3 pointer-events-auto overflow-x-hidden" onClick={(e) => e.stopPropagation()}>
++            <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+               <button 
+                 onClick={togglePlay} 
+-                className="text-white hover:text-blue-400 transition-colors focus:outline-none cursor-pointer"
++                className="text-white hover:text-blue-400 transition-colors focus:outline-none cursor-pointer p-1"
+               >
+-                {isPlaying ? <Pause className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 fill-current" /> : <Play className="w-7 h-7 sm:w-8 sm:h-8 md:w-10 md:h-10 fill-current" />}
++                {isPlaying ? <Pause className="w-6 h-6 sm:w-8 sm:h-8 md:w-10 md:h-10 fill-current" /> : <Play className="w-6 h-6 sm:w-8 sm:h-8 md:w-10 md:h-10 fill-current" />}
+               </button>
+               
+               <button 
+                 onClick={jumpToLive}
+-                className={`flex items-center gap-1.5 sm:gap-2 transition-colors focus:outline-none cursor-pointer ${isAtLiveEdge ? 'text-white/90' : 'text-neutral-500 hover:text-white'}`}
++                className={`flex items-center gap-1 sm:gap-2 transition-colors focus:outline-none cursor-pointer ${isAtLiveEdge ? 'text-white/90' : 'text-neutral-500 hover:text-white'}`}
+                 title="Jump to Live"
+               >
+                 <span className={`w-2 h-2 rounded-full ${isAtLiveEdge ? 'bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.8)] animate-pulse' : 'bg-neutral-600'}`}></span>
+-                <span className="font-bold text-xs sm:text-sm tracking-wider">LIVE</span>
++                <span className="font-bold text-[11px] sm:text-sm tracking-wider">LIVE</span>
+               </button>
+             </div>
+ 
+-            <div className="flex items-center gap-1 sm:gap-2 md:gap-4">
+-              <div className="flex items-center gap-2 md:gap-3 group/volume mr-1 sm:mr-2">
++            <div className="flex items-center gap-0.5 sm:gap-2 md:gap-4 shrink-0">
++              <div className="flex items-center gap-1 sm:gap-3 group/volume">
+                 <button 
+                   onClick={(e) => { e.stopPropagation(); setIsMuted(!isMuted); }}
+-                  className="text-white hover:text-blue-400 transition-colors focus:outline-none cursor-pointer p-1"
++                  className="text-white hover:text-blue-400 transition-colors focus:outline-none cursor-pointer p-1.5 sm:p-2"
+                 >
+                   {isMuted || volume === 0 ? <VolumeX className="w-5 h-5 sm:w-6 sm:h-6" /> : <Volume2 className="w-5 h-5 sm:w-6 sm:h-6" />}
+                 </button>
+@@ -771,70 +662,24 @@ export default function VideoPlayer() {
+                     e.stopPropagation(); 
+                     navigate(`/player/${previousChannelId}`, { state: { ...location.state, previousChannelId: channelId } }); 
+                   }}
+-                  className="p-1.5 sm:p-2 text-white hover:text-blue-400 rounded-full transition-colors flex items-center justify-center focus:outline-none mr-0.5 sm:mr-1 cursor-pointer"
++                  className="p-1.5 sm:p-2 text-white hover:text-blue-400 rounded-full transition-colors flex items-center justify-center focus:outline-none cursor-pointer"
+                   title="Last Channel"
+                 >
+                   <History className="w-5 h-5 sm:w-6 sm:h-6" />
+                 </button>
+               )}
+ 
+-              {/* Security Camera PiP Overlay Toggle */}
+-              {rtspCameras.length > 0 && (
+-                <div className="relative">
+-                  <button
+-                    onClick={(e) => {
+-                      e.stopPropagation();
+-                      if (pipCamera) {
+-                        setPipCamera(null);
+-                        setShowCameraMenu(false);
+-                      } else if (rtspCameras.length === 1) {
+-                        setPipCamera(rtspCameras[0]);
+-                      } else {
+-                        setShowCameraMenu(!showCameraMenu);
+-                      }
+-                    }}
+-                    className={`p-1.5 sm:p-2 rounded-full transition-colors flex items-center justify-center focus:outline-none cursor-pointer ${
+-                      pipCamera ? "text-blue-400 bg-blue-600/20" : "text-white hover:text-blue-400"
+-                    }`}
+-                    title={pipCamera ? "Close Camera PiP" : "Camera Picture-in-Picture"}
+-                  >
+-                    <Video className="w-5 h-5 sm:w-6 sm:h-6" />
+-                  </button>
+-
+-                  {showCameraMenu && !pipCamera && (
+-                    <div 
+-                      className="absolute bottom-full right-0 mb-3 w-48 bg-neutral-900/95 backdrop-blur-xl border border-neutral-800 rounded-2xl p-2 shadow-2xl z-50 flex flex-col gap-1"
+-                      onClick={(e) => e.stopPropagation()}
+-                    >
+-                      <div className="text-[11px] font-bold text-neutral-400 px-2 py-1 uppercase tracking-wider">
+-                        Pin Camera
+-                      </div>
+-                      {rtspCameras.map((cam) => (
+-                        <button
+-                          key={cam.id}
+-                          onClick={() => {
+-                            setPipCamera(cam);
+-                            setShowCameraMenu(false);
+-                          }}
+-                          className="w-full text-left px-2.5 py-1.5 text-xs text-neutral-200 hover:bg-blue-600 hover:text-white rounded-lg transition-colors truncate"
+-                        >
+-                          {cam.name}
+-                        </button>
+-                      ))}
+-                    </div>
+-                  )}
+-                </div>
++              {/* Native OS Picture in Picture (Desktop only) */}
++              {!isMobile && (
++                <button
++                  onClick={toggleNativePip}
++                  className="hidden md:flex p-1.5 sm:p-2 text-white hover:text-blue-400 rounded-full transition-colors items-center justify-center focus:outline-none cursor-pointer"
++                  title="Picture in Picture"
++                >
++                  <PictureInPicture2 className="w-5 h-5 sm:w-6 sm:h-6" />
++                </button>
+               )}
+ 
+-              {/* Native OS Picture in Picture */}
+-              <button
+-                onClick={toggleNativePip}
+-                className="p-1.5 sm:p-2 text-white hover:text-blue-400 rounded-full transition-colors flex items-center justify-center focus:outline-none cursor-pointer"
+-                title="Picture in Picture"
+-              >
+-                <PictureInPicture2 className="w-5 h-5 sm:w-6 sm:h-6" />
+-              </button>
+-
+               {/* More Channels integrated into controls */}
+               <button 
+                 onClick={(e) => { e.stopPropagation(); setDrawerOpen(true); }}
+@@ -870,7 +715,7 @@ export default function VideoPlayer() {
+             </button>
+           </div>
+           
+-          <div className="flex overflow-x-auto gap-2 pb-2 no-scrollbar pointer-events-auto">
++          <div className={`flex overflow-x-auto gap-2 pb-2 pointer-events-auto ${isMobile ? 'no-scrollbar' : 'custom-scrollbar'}`}>
+             {availableCategories.map(cat => (
+               <button
+                 key={cat}

@@ -30,10 +30,10 @@ func httpClient() *http.Client {
 	}
 }
 
-func ParseM3U(rawURL string) ([]Channel, error) {
+func ParseM3U(rawURL string) ([]Channel, string, error) {
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req.Header.Set("Accept", "text/plain, */*")
@@ -41,21 +41,35 @@ func ParseM3U(rawURL string) ([]Channel, error) {
 
 	resp, err := httpClient().Do(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	return parseM3UContent(string(data)), nil
+	channels, epgUrl := parseM3UContent(string(data))
+	return channels, epgUrl, nil
 }
 
-func parseM3UContent(content string) []Channel {
+func parseM3UContent(content string) ([]Channel, string) {
 	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
 	var channels []Channel
+	epgUrl := ""
+
+	if len(lines) > 0 && strings.HasPrefix(lines[0], "#EXTM3U") {
+		// Try to extract x-tvg-url
+		idx := strings.Index(lines[0], `x-tvg-url="`)
+		if idx != -1 {
+			start := idx + 11
+			end := strings.Index(lines[0][start:], `"`)
+			if end != -1 {
+				epgUrl = lines[0][start : start+end]
+			}
+		}
+	}
 
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
@@ -123,5 +137,5 @@ func parseM3UContent(content string) []Channel {
 		}
 	}
 
-	return channels
+	return channels, epgUrl
 }

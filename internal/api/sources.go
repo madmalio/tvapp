@@ -194,7 +194,7 @@ func deleteSourceHandler(w http.ResponseWriter, r *http.Request) {
 func parseSource(s db.SourceRow) {
 	if s.Type == "iptv" {
 		// Parse M3U
-		iptvChannels, err := iptv.ParseM3U(s.URL)
+		iptvChannels, epgUrl, err := iptv.ParseM3U(s.URL)
 		if err != nil {
 			log.Printf("[source:%d] m3u parse failed: %v", s.ID, err)
 			return
@@ -218,6 +218,12 @@ func parseSource(s db.SourceRow) {
 			return
 		}
 		log.Printf("[source:%d] loaded %d channels", s.ID, len(rows))
+
+		if epgUrl != "" && s.EpgURL == "" {
+			log.Printf("[source:%d] auto-discovered embedded EPG: %s", s.ID, epgUrl)
+			s.EpgURL = epgUrl
+			db.UpdateSource(&s)
+		}
 
 		// Parse EPG if provided
 		if s.EpgURL != "" {

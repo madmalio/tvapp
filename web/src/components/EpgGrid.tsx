@@ -29,20 +29,19 @@ const PIXELS_PER_MINUTE = 8;
 const CATEGORIES = ['All', 'Movies', 'News', 'Sports', 'Kids', 'Entertainment', 'Docs & Learning', 'Music', 'Local', 'Other'];
 
 function mapCategory(rawGroup: string, channelName: string = ""): string {
-  if (channelName) {
-    const lowerName = channelName.toLowerCase();
-    if (lowerName.match(/nbc|abc|cbs|fox|cw|pbs/)) return 'Local';
-  }
-  if (!rawGroup) return 'Other';
-  const lower = rawGroup.toLowerCase();
-  if (lower.match(/movie|cinema|film|box office/)) return 'Movies';
-  if (lower.match(/news|weather|breaking|journal/)) return 'News';
-  if (lower.match(/sport|espn|nfl|nba|mlb|nhl|wwe|racing/)) return 'Sports';
-  if (lower.match(/kid|child|family|animation|cartoon|disney|nick/)) return 'Kids';
-  if (lower.match(/comedy|drama|reality|tv show|sitcom|entertainment/)) return 'Entertainment';
-  if (lower.match(/doc|history|science|discovery|nature|learning/)) return 'Docs & Learning';
-  if (lower.match(/music|mtv|vh1|concert|radio/)) return 'Music';
-  if (lower.match(/local|us|uk|region|city/)) return 'Local';
+  const lowerGroup = (rawGroup || "").toLowerCase();
+  const lowerName = (channelName || "").toLowerCase();
+  const target = lowerGroup ? `${lowerGroup} ${lowerName}` : lowerName;
+
+  if (target.match(/movie|cinema|film|box office|hbo|cinemax|starz|tcm|showtime|amc|paramount/)) return 'Movies';
+  if (target.match(/news|weather|breaking|journal|cnn|fox news|msnbc|bbc|bloomberg|cnbc/)) return 'News';
+  if (target.match(/sport|espn|nfl|nba|mlb|nhl|wwe|racing|golf|tennis|nascar|ufc|boxing/)) return 'Sports';
+  if (target.match(/kid|child|family|animation|cartoon|disney|nick|pbs kids/)) return 'Kids';
+  if (target.match(/music|mtv|vh1|concert|radio|vevo/)) return 'Music';
+  if (target.match(/doc|history|science|discovery|nature|learning|animal planet|nat geo/)) return 'Docs & Learning';
+  if (target.match(/nbc|abc|cbs|fox|cw|pbs|local|us|uk|region|city/)) return 'Local';
+  if (target.match(/comedy|drama|reality|tv show|sitcom|entertainment/)) return 'Entertainment';
+  
   return 'Other';
 }
 
@@ -161,8 +160,22 @@ export default function EpgGrid() {
 
   const gridContent = useMemo(() => {
     return filteredChannels.slice(0, visibleRows).map((ch) => {
-      const chEntries = epgByChannel[ch.id] || [];
-      if (chEntries.length === 0) return null; // Hide channels with no EPG data
+      let chEntries = epgByChannel[ch.id] || [];
+      if (chEntries.length === 0) {
+        const dummyStart = new Date(gridStartTime);
+        dummyStart.setHours(0,0,0,0);
+        dummyStart.setDate(dummyStart.getDate() - 1);
+        const dummyEnd = new Date(dummyStart);
+        dummyEnd.setDate(dummyEnd.getDate() + 3);
+        chEntries = [{
+          id: -ch.id,
+          channel_id: ch.id,
+          title: ch.name || "Unknown Channel",
+          description: "No schedule information available.",
+          start_time: dummyStart.toISOString(),
+          end_time: dummyEnd.toISOString()
+        }];
+      }
 
       return (
         <div key={ch.id} className="flex group hover:bg-neutral-900/30 transition-colors border-b border-neutral-800/30 h-20">
@@ -267,7 +280,7 @@ export default function EpgGrid() {
     );
   }
 
-  if (channels.length === 0 || entries.length === 0) {
+  if (channels.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center p-4 md:pl-20 pb-16 md:pb-0 bg-neutral-950 h-full">
         <div className="bg-neutral-900/50 backdrop-blur-xl border border-neutral-800 rounded-2xl p-8 max-w-md text-center mx-4">
@@ -444,4 +457,5 @@ export default function EpgGrid() {
     </div>
   );
 }
+
 
