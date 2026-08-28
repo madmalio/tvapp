@@ -266,8 +266,10 @@ export default function ChannelList() {
             <button
               key={src.id}
               onClick={() => startTransition(() => {
-                setActiveSourceId(src.id);
-                setActiveCategory('All');
+                if (activeSourceId !== src.id) {
+                  setActiveSourceId(src.id);
+                  setActiveCategory('All');
+                }
               })}
               className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors backdrop-blur-md border shrink-0 cursor-pointer ${
                 activeSourceId === src.id 
@@ -391,4 +393,5 @@ export default function ChannelList() {
     </div>
   );
 }
+
 
