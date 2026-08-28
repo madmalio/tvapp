@@ -1,6 +1,7 @@
 package epg
 
 import (
+	"bytes"
 	"compress/gzip"
 	"encoding/xml"
 	"fmt"
@@ -70,13 +71,30 @@ func ParseXMLTV(rawURL string) ([]Entry, error) {
 	}
 
 	var reader io.Reader = resp.Body
-	if resp.Header.Get("Content-Encoding") == "gzip" {
-		gz, err := gzip.NewReader(resp.Body)
+	
+	// Read first 2 bytes to check for gzip magic number
+	header := make([]byte, 2)
+	n, _ := io.ReadFull(reader, header)
+	
+	// Combine the read bytes with the rest of the body
+	var bodyReader io.Reader
+	if n == 2 {
+		bodyReader = io.MultiReader(bytes.NewReader(header), reader)
+	} else if n == 1 {
+		bodyReader = io.MultiReader(bytes.NewReader(header[:1]), reader)
+	} else {
+		bodyReader = reader
+	}
+
+	if resp.Header.Get("Content-Encoding") == "gzip" || (n == 2 && header[0] == 0x1f && header[1] == 0x8b) {
+		gz, err := gzip.NewReader(bodyReader)
 		if err != nil {
 			return nil, err
 		}
 		defer gz.Close()
 		reader = gz
+	} else {
+		reader = bodyReader
 	}
 
 	data, err := io.ReadAll(reader)
@@ -149,3 +167,7 @@ func parseXMLTVTime(s string) (time.Time, error) {
 	}
 	return time.Parse(format, t+offset)
 }
+
+
+
+

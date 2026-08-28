@@ -139,3 +139,4 @@ func parseM3UContent(content string) ([]Channel, string) {
 
 	return channels, epgUrl
 }
+

@@ -236,15 +236,33 @@ func parseSource(s db.SourceRow) {
 			// We need fresh channels to map IDs
 			savedChannels, _ := db.GetChannels()
 			channelMap := make(map[string]int)
+			channelNameMap := make(map[string]int)
 			for _, ch := range savedChannels {
-				if ch.SourceID == s.ID && ch.TvgID != "" {
-					channelMap[ch.TvgID] = ch.ID
+				if ch.SourceID == s.ID {
+					if ch.TvgID != "" {
+						channelMap[ch.TvgID] = ch.ID
+					}
+					// fallback name map
+					normalized := strings.ToLower(strings.ReplaceAll(ch.Name, " ", ""))
+					channelNameMap[normalized] = ch.ID
 				}
 			}
 
 			epgRows := []db.EPGEntryRow{}
 			for _, e := range entries {
-				if dbID, ok := channelMap[e.ChannelID]; ok {
+				dbID, ok := channelMap[e.ChannelID]
+				if !ok {
+					for _, cname := range e.ChannelNames {
+						normCName := strings.ToLower(strings.ReplaceAll(cname, " ", ""))
+						if fallbackID, ok2 := channelNameMap[normCName]; ok2 {
+							dbID = fallbackID
+							ok = true
+							break
+						}
+					}
+				}
+				
+				if ok {
 					epgRows = append(epgRows, db.EPGEntryRow{
 						ChannelID:   dbID,
 						Title:       e.Title,
@@ -455,3 +473,4 @@ func StartNightlySync() {
 func ReloadSyncTimer() {
 	StartNightlySync()
 }
+
