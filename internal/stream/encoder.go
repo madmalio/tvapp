@@ -135,15 +135,15 @@ func GetOptimalVideoArgs(quality string) []string {
 	case "1080p_std":
 		args = append(args, "-maxrate", "5M", "-bufsize", "10M")
 	case "720p_high":
-		args = append(args, "-maxrate", "4M", "-bufsize", "8M", "-vf", "bwdif,scale=-1:720")
+		args = append(args, "-maxrate", "4M", "-bufsize", "8M", "-vf", "bwdif,scale=-2:720")
 	case "720p_std":
-		args = append(args, "-maxrate", "2M", "-bufsize", "4M", "-vf", "bwdif,scale=-1:720")
+		args = append(args, "-maxrate", "2M", "-bufsize", "4M", "-vf", "bwdif,scale=-2:720")
 	case "480p_high":
-		args = append(args, "-maxrate", "1.5M", "-bufsize", "3M", "-vf", "bwdif,scale=-1:480")
+		args = append(args, "-maxrate", "1.5M", "-bufsize", "3M", "-vf", "bwdif,scale=-2:480")
 	case "480p_std":
-		args = append(args, "-maxrate", "1M", "-bufsize", "2M", "-vf", "bwdif,scale=-1:480")
+		args = append(args, "-maxrate", "1M", "-bufsize", "2M", "-vf", "bwdif,scale=-2:480")
 	case "360p_low":
-		args = append(args, "-maxrate", "800k", "-bufsize", "1.5M", "-vf", "bwdif,scale=-1:360")
+		args = append(args, "-maxrate", "800k", "-bufsize", "1.5M", "-vf", "bwdif,scale=-2:360")
 	default:
 		// Default to source
 	}
@@ -196,9 +196,9 @@ func GetOptimalVideoArgs(quality string) []string {
 		scale := ""
 		if quality == "1080p_high" { qp = "23" }
 		if quality == "1080p_std" { qp = "26" }
-		if quality == "720p_high" { qp = "26"; scale = "-1:720" }
-		if quality == "720p_std" { qp = "29"; scale = "-1:720" }
-		if quality == "480p_high" { qp = "32"; scale = "-1:480" }
+		if quality == "720p_high" { qp = "26"; scale = "-2:720" }
+		if quality == "720p_std" { qp = "29"; scale = "-2:720" }
+		if quality == "480p_high" { qp = "32"; scale = "-2:480" }
 		finalArgs = append(finalArgs, "-qp", qp, "-vf", buildVf(scale))
 	} else {
 		// Software encoder supports perfect CBR. We add -b:v to force CBR instead of defaulting to a starved CRF.
@@ -208,15 +208,15 @@ func GetOptimalVideoArgs(quality string) []string {
 		} else if quality == "1080p_std" {
 			finalArgs = append(finalArgs, "-b:v", "5M", "-maxrate", "5M", "-bufsize", "10M", "-r", "30", "-vf", buildVf(""))
 		} else if quality == "720p_high" {
-			finalArgs = append(finalArgs, "-b:v", "4M", "-maxrate", "4M", "-bufsize", "8M", "-vf", buildVf("-1:720"))
+			finalArgs = append(finalArgs, "-b:v", "4M", "-maxrate", "4M", "-bufsize", "8M", "-vf", buildVf("-2:720"))
 		} else if quality == "720p_std" {
-			finalArgs = append(finalArgs, "-b:v", "2M", "-maxrate", "2M", "-bufsize", "4M", "-r", "30", "-vf", buildVf("-1:720"))
+			finalArgs = append(finalArgs, "-b:v", "2M", "-maxrate", "2M", "-bufsize", "4M", "-r", "30", "-vf", buildVf("-2:720"))
 		} else if quality == "480p_high" {
-			finalArgs = append(finalArgs, "-b:v", "1.5M", "-maxrate", "1.5M", "-bufsize", "3M", "-r", "30", "-vf", buildVf("-1:480"))
+			finalArgs = append(finalArgs, "-b:v", "1.5M", "-maxrate", "1.5M", "-bufsize", "3M", "-r", "30", "-vf", buildVf("-2:480"))
 		} else if quality == "480p_std" {
-			finalArgs = append(finalArgs, "-b:v", "1M", "-maxrate", "1M", "-bufsize", "2M", "-r", "30", "-vf", buildVf("-1:480"))
+			finalArgs = append(finalArgs, "-b:v", "1M", "-maxrate", "1M", "-bufsize", "2M", "-r", "30", "-vf", buildVf("-2:480"))
 		} else if quality == "360p_low" {
-			finalArgs = append(finalArgs, "-b:v", "800k", "-maxrate", "800k", "-bufsize", "1.5M", "-r", "30", "-vf", buildVf("-1:360"))
+			finalArgs = append(finalArgs, "-b:v", "800k", "-maxrate", "800k", "-bufsize", "1.5M", "-r", "30", "-vf", buildVf("-2:360"))
 		} else {
 			finalArgs = append(finalArgs, "-vf", buildVf(""))
 		}

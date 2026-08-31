@@ -785,7 +785,7 @@ export default function VideoPlayer() {
                   
                   {showQualityMenu && (
                     <div 
-                      className="absolute bottom-full right-0 mb-4 w-52 sm:w-56 bg-neutral-900/95 backdrop-blur-xl border border-neutral-700/50 rounded-2xl p-2 shadow-2xl flex flex-col gap-1 z-50 pointer-events-auto"
+                      className="absolute bottom-full right-0 mb-4 w-52 sm:w-56 max-h-[60vh] sm:max-h-[75vh] overflow-y-auto custom-scrollbar bg-neutral-900/95 backdrop-blur-xl border border-neutral-700/50 rounded-2xl p-2 shadow-2xl flex flex-col gap-1 z-50 pointer-events-auto"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <div className="text-xs font-semibold text-neutral-400 px-3 py-2 uppercase tracking-wider">
