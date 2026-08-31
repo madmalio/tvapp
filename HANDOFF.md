@@ -33,6 +33,13 @@ Video Player UX Improvements:
 - **Streaming Quality Automations**: The frontend performs a speed test via `useSpeedTest.ts` to automatically select the best stream quality. Manual overrides by the user are now saved in `sessionStorage` rather than `localStorage`, ensuring the app naturally reassesses the connection quality on every fresh app load.
 - **Mobile Menu Interactions**: Fixed iOS double-tap bugs where fixed absolute positioning elements (Quality toggle, Camera PiP toggle) failed to open.
 
+**DVR & Recording System**:
+- Full DVR scheduler (`internal/dvr/scheduler.go`) handles automated recordings based on EPG data.
+- HDHomeRun streams are transcoded on-the-fly (`internal/stream/recorder.go`) to H.264 so they play natively in web browsers without plugins.
+- Recordings are instantly remuxed to MP4 (`-movflags +faststart`) upon completion, enabling buttery-smooth native scrubbing without relying on HLS segments.
+- Live active recordings feature a precise strict-cutoff (using `context.WithTimeout` on the FFmpeg process) guaranteeing they stop exactly when the EPG slot ends.
+- The UI includes manual start/stop toggles in the Video Player and a manual Kill Switch in the DVR dashboard for active recordings.
+
 **MediaMTX Live Streaming Architecture (HDHomeRun & Custom Streams)**:
 - Migrated away from disk-based `.ts` chunk generation which caused severe disk I/O bottlenecks and stuttering.
 - `ffmpeg` now pipes streams directly into MediaMTX memory via RTSP (`rtsp://localhost:8554/<id>`).
@@ -96,5 +103,4 @@ scp .\bin\tvapp-linux mark@192.168.4.143:~/tvapp/tvapp
 1. **Mobile Sticky Titles Issue**: The user previously noted that "there is an issue with the sticky titles but i we will pick back up tomorrow." In `EpgGrid.tsx`, `max-md:sticky max-md:left-0` was implemented to keep program titles visible on mobile during horizontal scrolling.
 2. **Favorites** - The `favorites` table exists in the schema but no UI
 3. **Channel search** - Text search for channels/programs
-4. **DVR / Recording** - Hook up future program clicks in the modal to a scheduled recording service
-5. **Native HLS on Safari** - Detect Safari and use `<video src>` directly (no proxy needed, bypasses CORS)
+4. **Native HLS on Safari** - Detect Safari and use `<video src>` directly (no proxy needed, bypasses CORS)

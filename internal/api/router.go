@@ -43,6 +43,11 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 	r.Put("/api/sources/{id}", updateSourceHandler)
 	r.Delete("/api/sources/{id}", deleteSourceHandler)
 	r.Get("/api/epg", getEpgHandler)
+	r.Get("/api/recordings", getRecordings)
+	r.Get("/api/recordings/{id}", getRecording)
+	r.Post("/api/recordings", addRecording)
+	r.Post("/api/recordings/{id}/stop", stopRecording)
+	r.Delete("/api/recordings/{id}", deleteRecording)
 	r.Get("/api/speedtest", speedtestHandler)
 	r.Get("/api/settings", getSettingsHandler)
 	r.Put("/api/settings", updateSettingsHandler)
@@ -50,6 +55,9 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 	r.Delete("/api/stream/stop/{id}", stopStreamHandler)
 	r.Get("/api/stream/heartbeat/{id}", heartbeatStreamHandler)
 	r.Get("/api/stream/hls/*", serveHLSHandler)
+
+	// Serve DVR recordings directly
+	r.Handle("/recordings/*", http.StripPrefix("/recordings/", http.FileServer(http.Dir("recordings"))))
 
 	fileServer := http.FileServer(http.FS(distFS))
 	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {

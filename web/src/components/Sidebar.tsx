@@ -1,9 +1,10 @@
 import { NavLink } from "react-router-dom";
-import { Tv, MonitorPlay, Video, Settings } from "lucide-react";
+import { Tv, MonitorPlay, Video, Settings, Film } from "lucide-react";
 
 const navItems = [
   { to: "/channels", label: "Channels", icon: Tv },
   { to: "/guide", label: "Guide", icon: MonitorPlay },
+  { to: "/recordings", label: "DVR", icon: Film },
   { to: "/cameras", label: "Cameras", icon: Video },
   { to: "/settings", label: "Settings", icon: Settings },
 ];

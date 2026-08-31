@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo, startTransition, useRef } from "react";
 import { Link } from "react-router-dom";
 import { getApiUrl, fetchWithCache } from "../lib/api";
 import { useApi } from "../hooks/useApi";
-import { Tv } from "lucide-react";
+import { Tv, CheckCircle2, AlertCircle, Loader2, X } from "lucide-react";
 import { lockToLandscape } from "../lib/orientation";
 
 type Source = { id: number; name: string; type: string; url: string; epg_url: string; };
@@ -63,6 +63,16 @@ export default function EpgGrid() {
   const [entries, setEntries] = useState<EPGEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedProgram, setSelectedProgram] = useState<{ entry: EPGEntry, channel: Channel } | null>(null);
+  
+  type Toast = { id: string; title: string; message?: string; type: "success" | "error" | "info" | "loading"; };
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const addToast = (toast: Omit<Toast, 'id'>, duration = 4000) => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts((prev) => [...prev, { ...toast, id }]);
+    if (duration > 0) setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), duration);
+    return id;
+  };
+  const removeToast = (id: string) => setToasts((prev) => prev.filter((t) => t.id !== id));
   
   const [activeCategory, setActiveCategory] = useState<string>(() => {
     return sessionStorage.getItem("tvapp_epg_category") || 'All';
@@ -443,9 +453,31 @@ export default function EpgGrid() {
               >
                 Close
               </button>
-              {new Date(selectedProgram.entry.start_time) > currentTime ? (
-                <button disabled className="px-5 py-2 rounded-lg font-medium bg-blue-600/30 text-blue-300 cursor-not-allowed border border-blue-500/20">
-                  Record (Coming Soon)
+              {new Date(selectedProgram.entry.end_time) > currentTime ? (
+                <button 
+                  onClick={() => {
+                    const isLive = new Date(selectedProgram.entry.start_time) <= currentTime;
+                    fetch(getApiUrl('/api/recordings'), {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        channel_id: selectedProgram.channel.id,
+                        epg_id: selectedProgram.entry.id > 0 ? selectedProgram.entry.id : 0,
+                        title: selectedProgram.entry.title,
+                        start_time: isLive ? new Date().toISOString() : selectedProgram.entry.start_time,
+                        end_time: selectedProgram.entry.end_time
+                      })
+                    }).then(() => {
+                      addToast({ title: "Recording scheduled!", type: "success" });
+                      setSelectedProgram(null);
+                    }).catch(err => {
+                      console.error(err);
+                      addToast({ title: "Failed to schedule recording", type: "error" });
+                    });
+                  }}
+                  className="px-5 py-2 rounded-lg font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors cursor-pointer shadow-lg shadow-blue-500/20 border border-blue-500"
+                >
+                  {new Date(selectedProgram.entry.start_time) <= currentTime ? 'Record Remaining' : 'Schedule Recording'}
                 </button>
               ) : (
                 <button disabled className="px-5 py-2 rounded-lg font-medium bg-neutral-800/50 text-neutral-500 cursor-not-allowed border border-neutral-700/30">
@@ -456,6 +488,40 @@ export default function EpgGrid() {
           </div>
         </div>
       )}
+
+      {/* Floating Toast Notification Container */}
+      <div className="fixed bottom-20 sm:bottom-6 right-4 sm:right-6 z-[100] flex flex-col gap-2 pointer-events-none">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className={`flex items-center justify-between gap-3 p-3 sm:p-4 rounded-xl shadow-xl pointer-events-auto border backdrop-blur-md transition-all duration-300 animate-in slide-in-from-right-8 sm:slide-in-from-bottom-5 fade-in min-w-[280px] max-w-sm ${
+              t.type === 'success'
+                ? 'bg-emerald-900/40 border-emerald-800 text-emerald-300'
+                : t.type === 'error'
+                ? 'bg-red-900/40 border-red-800 text-red-300'
+                : t.type === 'loading'
+                ? 'bg-blue-900/40 border-blue-800 text-blue-300'
+                : 'bg-neutral-900/80 border-neutral-700 text-neutral-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              {t.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-400" />}
+              {t.type === 'error' && <AlertCircle className="w-5 h-5 text-red-400" />}
+              {t.type === 'loading' && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
+              <div>
+                <h4 className="font-semibold text-sm">{t.title}</h4>
+                {t.message && <p className="text-xs opacity-80 mt-0.5">{t.message}</p>}
+              </div>
+            </div>
+            <button
+              onClick={() => removeToast(t.id)}
+              className="p-1 hover:bg-black/20 rounded-lg transition-colors opacity-70 hover:opacity-100"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

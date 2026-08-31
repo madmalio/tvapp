@@ -72,6 +72,18 @@ func migrate() error {
 		value TEXT NOT NULL
 	);
 
+	CREATE TABLE IF NOT EXISTS recordings (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		channel_id  INTEGER REFERENCES channels(id) ON DELETE CASCADE,
+		epg_id      INTEGER,
+		title       TEXT NOT NULL,
+		start_time  DATETIME NOT NULL,
+		end_time    DATETIME NOT NULL,
+		status      TEXT DEFAULT 'scheduled',
+		file_path   TEXT,
+		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_epg_channel_time ON epg_entries(channel_id, start_time, end_time);
 	CREATE INDEX IF NOT EXISTS idx_epg_time ON epg_entries(end_time, start_time);
 	CREATE INDEX IF NOT EXISTS idx_channel_source ON channels(source_id);
@@ -476,4 +488,66 @@ func GetAllSettings() (map[string]string, error) {
 		}
 	}
 	return settings, nil
+}
+
+type RecordingRow struct {
+	ID        int    `json:"id"`
+	ChannelID int    `json:"channel_id"`
+	EpgID     int    `json:"epg_id,omitempty"`
+	Title     string `json:"title"`
+	StartTime string `json:"start_time"`
+	EndTime   string `json:"end_time"`
+	Status    string `json:"status"`
+	FilePath  string `json:"file_path,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
+}
+
+func SaveRecording(r *RecordingRow) error {
+	res, err := conn.Exec(`INSERT INTO recordings(channel_id, epg_id, title, start_time, end_time, status) VALUES(?, ?, ?, ?, ?, ?)`,
+		r.ChannelID, r.EpgID, r.Title, r.StartTime, r.EndTime, r.Status)
+	if err != nil {
+		return err
+	}
+	id, err := res.LastInsertId()
+	if err == nil {
+		r.ID = int(id)
+	}
+	return err
+}
+
+func GetRecordings() ([]RecordingRow, error) {
+	rows, err := conn.Query(`SELECT id, channel_id, COALESCE(epg_id, 0), title, start_time, end_time, status, COALESCE(file_path, ''), created_at FROM recordings ORDER BY start_time ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RecordingRow
+	for rows.Next() {
+		var r RecordingRow
+		if err := rows.Scan(&r.ID, &r.ChannelID, &r.EpgID, &r.Title, &r.StartTime, &r.EndTime, &r.Status, &r.FilePath, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func GetRecording(id int) (*RecordingRow, error) {
+	row := conn.QueryRow(`SELECT id, channel_id, COALESCE(epg_id, 0), title, start_time, end_time, status, COALESCE(file_path, ''), created_at FROM recordings WHERE id = ?`, id)
+	var r RecordingRow
+	if err := row.Scan(&r.ID, &r.ChannelID, &r.EpgID, &r.Title, &r.StartTime, &r.EndTime, &r.Status, &r.FilePath, &r.CreatedAt); err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+func UpdateRecordingStatus(id int, status string, filePath string) error {
+	_, err := conn.Exec(`UPDATE recordings SET status = ?, file_path = ? WHERE id = ?`, status, filePath, id)
+	return err
+}
+
+func DeleteRecording(id int) error {
+	_, err := conn.Exec(`DELETE FROM recordings WHERE id = ?`, id)
+	return err
 }

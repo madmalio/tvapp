@@ -108,6 +108,7 @@ tvapp/
 - **M3U Parsing**: Extracts both `x-tvg-url` and `url-tvg` via regex from `#EXTM3U`. EPG linking falls back to case-insensitive name matching if `tvg-id` is absent.
 - **Mobile Adjustments**: PiP functionality and related settings are explicitly hidden on mobile layouts via Tailwind (`hidden sm:block`) to save space. Navigation avoids accidentally resetting states (like category going back to "All") by utilizing strict change-checks on tuner pills (`activeSourceId !== src.id`).
 - **Streaming Quality Override**: Manual quality overrides are saved in `sessionStorage` rather than `localStorage`, meaning the automatic speed test will appropriately re-assess the default quality on every new session/app load.
+- **DVR Architecture**: Scheduled and manual recordings use `internal/stream/recorder.go` to save streams directly to disk. HDHomeRun recordings are transcoded on-the-fly to H.264 so they play natively in web browsers. Finished recordings are automatically remuxed into a single `.mp4` file via `-movflags +faststart` to enable instant scrubbing. Live recordings sync with EPG end times and enforce a strict shutdown via `context.WithTimeout` to prevent run-on. Active recordings can be gracefully stopped manually from the DVR UI or by toggling the record button in the player.
 
 ## Known PlutoTV Constraints
 

@@ -12,6 +12,7 @@ import (
 	"tvapp/cmd/server/webdist"
 	"tvapp/internal/api"
 	"tvapp/internal/db"
+	"tvapp/internal/dvr"
 )
 
 func startMediaMTX() *exec.Cmd {
@@ -54,6 +55,7 @@ func main() {
 	api.RegisterAllRTSPCameras()
 
 	api.StartNightlySync()
+	dvr.Init()
 
 	go func() {
 		quit := make(chan os.Signal, 1)

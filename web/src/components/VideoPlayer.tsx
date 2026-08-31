@@ -187,7 +187,14 @@ export default function VideoPlayer() {
   const reloadAttemptsRef = useRef(0);
   const positionRef = useRef(0);
   const streamSessionIdRef = useRef<string | null>(null);
+
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
   
+  const [activeRecordingId, setActiveRecordingId] = useState<number | null>(null);
   const { playChannel, cameraPipEnabled, pipCamera, setPipCamera } = usePlayer();
   const [showCameraMenu, setShowCameraMenu] = useState(false);
   const { data: sources } = useApi<CameraInfo[]>("/api/sources");
@@ -217,7 +224,7 @@ export default function VideoPlayer() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [allChannels, setAllChannels] = useState<ChannelInfo[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>('All');
-  const [epgMap, setEpgMap] = useState<Record<number, string>>({});
+  const [epgMap, setEpgMap] = useState<Record<number, any>>({});
   
   const [showOverlay, setShowOverlay] = useState(true);
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -320,12 +327,12 @@ export default function VideoPlayer() {
     ])
     .then(([allCh, epgData]) => {
       setAllChannels(allCh);
-      const map: Record<number, string> = {};
+      const map: Record<number, any> = {};
       const now = new Date();
       if (epgData) {
         epgData.forEach((e: any) => {
           if (new Date(e.start_time) <= now && new Date(e.end_time) > now) {
-            map[e.channel_id] = e.title;
+            map[e.channel_id] = e;
           }
         });
       }
@@ -340,6 +347,7 @@ export default function VideoPlayer() {
     positionRef.current = 0;
     setIsAtLiveEdge(true);
     setIsPlaying(true);
+    setActiveRecordingId(null);
     
     if (allChannels.length > 0) {
       const ch = allChannels.find(c => c.id === parseInt(channelId));
@@ -372,7 +380,8 @@ export default function VideoPlayer() {
 
   useEffect(() => {
     if (!channelId) return;
-    const title = epgMap[parseInt(channelId)] || "";
+    const entry = epgMap[parseInt(channelId)];
+    const title = entry ? entry.title : "";
     setProgramTitle(prev => prev === title ? prev : title);
   }, [channelId, epgMap]);
 
@@ -647,6 +656,14 @@ export default function VideoPlayer() {
       onMouseMove={handleMouseMove}
       onClick={handleMouseMove}
     >
+      {/* Optional Toast Notification */}
+      {toastMessage && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[100] bg-black/80 text-white px-4 py-2 rounded-full text-sm font-medium backdrop-blur-md animate-in fade-in slide-in-from-top-4 shadow-lg border border-white/10">
+          {toastMessage}
+        </div>
+      )}
+
+      {/* Main Video Element */}
       <video
         ref={videoRef}
         className="absolute inset-0 w-full h-full object-contain bg-black z-0"
@@ -747,6 +764,56 @@ export default function VideoPlayer() {
             </div>
 
             <div className="flex items-center gap-0.5 sm:gap-2 md:gap-4 shrink-0">
+              {channel && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (activeRecordingId) {
+                      fetch(getApiUrl(`/api/recordings/${activeRecordingId}/stop`), { method: 'POST' })
+                        .then(() => {
+                          setActiveRecordingId(null);
+                          showToast("Recording stopped and saved");
+                        }).catch(console.error);
+                    } else {
+                      const entry = epgMap[channel.id];
+                      const epgId = entry ? entry.id : 0;
+                      const endTime = entry ? entry.end_time : new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+                      
+                      fetch(getApiUrl('/api/recordings'), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          channel_id: channel.id,
+                          epg_id: epgId,
+                          title: programTitle ? programTitle : `Manual Recording - ${channel.name}`,
+                          start_time: new Date().toISOString(),
+                          end_time: endTime
+                        })
+                      }).then(res => res.json())
+                        .then(data => {
+                          setActiveRecordingId(data.id || null);
+                          showToast("Recording started");
+                          
+                          // Auto-deactivate the button when the scheduled end time is reached
+                          const timeRemaining = new Date(endTime).getTime() - Date.now();
+                          if (timeRemaining > 0) {
+                            setTimeout(() => {
+                              setActiveRecordingId(current => current === data.id ? null : current);
+                            }, timeRemaining);
+                          }
+                        }).catch(err => {
+                          console.error(err);
+                          showToast("Failed to start recording");
+                        });
+                    }
+                  }}
+                  className={`text-white hover:text-red-400 transition-colors focus:outline-none cursor-pointer p-1.5 sm:p-2 group/record ${activeRecordingId ? 'animate-pulse' : ''}`}
+                  title={activeRecordingId ? "Stop Recording" : "Record Now"}
+                >
+                  <div className={`w-4 h-4 sm:w-5 sm:h-5 rounded-full shadow-[0_0_8px_rgba(220,38,38,0.8)] ${activeRecordingId ? 'bg-red-500 shadow-[0_0_12px_rgba(220,38,38,1)]' : 'bg-red-700 group-hover/record:bg-red-500'}`} />
+                </button>
+              )}
+
               <div className="flex items-center gap-1 sm:gap-3 group/volume">
                 <button 
                   onClick={(e) => { e.stopPropagation(); setIsMuted(!isMuted); }}
@@ -959,7 +1026,7 @@ export default function VideoPlayer() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className={`font-semibold truncate text-sm ${ch.id === parseInt(channelId || '0') ? 'text-blue-400' : 'text-neutral-200 group-hover:text-white'}`}>
-                  {epgMap[ch.id] || "No Data"}
+                  {epgMap[ch.id]?.title || "No Data"}
                 </p>
               </div>
             </Link>

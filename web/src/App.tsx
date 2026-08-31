@@ -5,6 +5,8 @@ import EpgGrid from "./components/EpgGrid";
 import VideoPlayer from "./components/VideoPlayer";
 import Settings from "./components/Settings";
 import Cameras from "./components/Cameras";
+import Recordings from "./components/Recordings";
+import RecordingPlayer from "./components/RecordingPlayer";
 import MiniPlayer from "./components/MiniPlayer";
 import { PlayerProvider } from "./context/PlayerContext";
 import { useSpeedTest } from "./hooks/useSpeedTest";
@@ -25,6 +27,8 @@ export default function App() {
             <Route path="/cameras" element={<Cameras />} />
             <Route path="/cameras/:cameraId" element={<Cameras />} />
             <Route path="/player/:channelId" element={<VideoPlayer />} />
+            <Route path="/player/recording/:id" element={<RecordingPlayer />} />
+            <Route path="/recordings" element={<Recordings />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/channels" replace />} />
           </Routes>
