@@ -18,6 +18,8 @@ type Channel = {
 type Recording = {
   id: number;
   epg_id: number;
+  channel_id: number;
+  start_time: string;
   status: string;
 };
 
@@ -54,12 +56,13 @@ function mapCategory(rawGroup: string, channelName: string = ""): string {
 export default function EpgGrid() {
   const { data: sourcesData } = useApi<Source[]>('/api/sources');
   const { data: recordings, refetch: refetchRecordings } = useApi<Recording[]>('/api/recordings');
-  const scheduledEpgIds = useMemo(() => {
-    const set = new Set<number>();
+  const scheduledKeys = useMemo(() => {
+    const set = new Set<string>();
     if (recordings) {
       recordings.forEach(r => {
-        if ((r.status === 'scheduled' || r.status === 'recording') && r.epg_id) {
-          set.add(r.epg_id);
+        if (r.status === 'scheduled' || r.status === 'recording') {
+          if (r.epg_id) set.add(`epg:${r.epg_id}`);
+          if (r.channel_id && r.start_time) set.add(`time:${r.channel_id}:${new Date(r.start_time).getTime()}`);
         }
       });
     }
@@ -134,7 +137,9 @@ export default function EpgGrid() {
   const [durationHours, setDurationHours] = useState(6);
 
   useEffect(() => {
+    if (!activeSourceId) return;
     if (channels.length === 0) setLoading(true);
+    
     // Load from 2 hours ago up to durationHours
     const now = new Date();
     now.setMinutes(0, 0, 0); // Align to the start of the hour for stable cache keys
@@ -143,13 +148,13 @@ export default function EpgGrid() {
 
     Promise.all([
       fetchWithCache(getApiUrl("/api/channels")),
-      fetchWithCache(getApiUrl(`/api/epg?start=${start}&end=${end}`))
+      fetchWithCache(getApiUrl(`/api/epg?source_id=${activeSourceId}&start=${start}&end=${end}`))
     ]).then(([chData, epgData]) => {
       setChannels(chData || []);
       setEntries(epgData || []);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [currentHour, durationHours]);
+  }, [currentHour, durationHours, activeSourceId]);
 
   const epgByChannel = useMemo(() => {
     const map: Record<number, EPGEntry[]> = {};
@@ -229,6 +234,7 @@ export default function EpgGrid() {
               const durationMinutes = (end.getTime() - start.getTime()) / 60000;
               
               if (offsetMinutes < 0 && offsetMinutes + durationMinutes <= 0) return null;
+              if (offsetMinutes >= durationHours * 60) return null; // cull off-screen right
 
               const leftOffset = Math.max(0, offsetMinutes) * PIXELS_PER_MINUTE;
               const width = (offsetMinutes < 0 ? durationMinutes + offsetMinutes : durationMinutes) * PIXELS_PER_MINUTE;
@@ -236,7 +242,7 @@ export default function EpgGrid() {
               const isActive = currentTime >= start && currentTime < end;
               const isPast = currentTime >= end;
 
-              const isScheduled = scheduledEpgIds.has(e.id);
+              const isScheduled = scheduledKeys.has(`epg:${e.id}`) || scheduledKeys.has(`time:${e.channel_id}:${start.getTime()}`);
               let backgroundStyle = {};
               if (isActive) {
                 const visibleStartMinutes = Math.max(0, offsetMinutes);
@@ -339,7 +345,7 @@ export default function EpgGrid() {
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollLeft, scrollWidth, clientWidth, scrollTop, scrollHeight, clientHeight } = e.currentTarget;
     if (scrollLeft + clientWidth >= scrollWidth - 100) {
-      setDurationHours(prev => Math.min(prev + 2, 24)); // add 2 hours when reaching the end, cap at 24
+      setDurationHours(prev => Math.min(prev + 2, 72)); // add 2 hours when reaching the end, cap at 72
     }
     if (scrollTop + clientHeight >= scrollHeight - 500) {
       setVisibleRows(prev => prev + 20); // render more rows as we scroll down
@@ -472,10 +478,13 @@ export default function EpgGrid() {
                 Close
               </button>
               {new Date(selectedProgram.entry.end_time) > currentTime ? (
-                scheduledEpgIds.has(selectedProgram.entry.id) ? (
+                (scheduledKeys.has(`epg:${selectedProgram.entry.id}`) || scheduledKeys.has(`time:${selectedProgram.channel.id}:${new Date(selectedProgram.entry.start_time).getTime()}`)) ? (
                   <button 
                     onClick={() => {
-                      const rec = recordings?.find(r => r.epg_id === selectedProgram.entry.id && (r.status === 'scheduled' || r.status === 'recording'));
+                      const rec = recordings?.find(r => 
+                        (r.epg_id === selectedProgram.entry.id || (r.channel_id === selectedProgram.channel.id && new Date(r.start_time).getTime() === new Date(selectedProgram.entry.start_time).getTime())) 
+                        && (r.status === 'scheduled' || r.status === 'recording')
+                      );
                       if (rec) {
                         fetch(getApiUrl(`/api/recordings/${rec.id}`), { method: 'DELETE' }).then(() => {
                           addToast({ title: "Recording cancelled", type: "success" });

@@ -611,12 +611,18 @@ func appendQuery(raw string, qs string) string {
 func getEpgHandler(w http.ResponseWriter, r *http.Request) {
 	start := r.URL.Query().Get("start")
 	end := r.URL.Query().Get("end")
+	sourceIDStr := r.URL.Query().Get("source_id")
 
 	var entries []db.EPGEntryRow
 	var err error
 
 	if start != "" && end != "" {
-		entries, err = db.GetEPGEntriesByTime(start, end)
+		if sourceIDStr != "" {
+			sourceID, _ := strconv.Atoi(sourceIDStr)
+			entries, err = db.GetEPGEntriesByTimeAndSource(sourceID, start, end)
+		} else {
+			entries, err = db.GetEPGEntriesByTime(start, end)
+		}
 	} else {
 		entries, err = db.GetAllEPGEntries()
 	}

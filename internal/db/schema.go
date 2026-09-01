@@ -462,8 +462,31 @@ func GetAllEPGEntries() ([]EPGEntryRow, error) {
 }
 
 func GetEPGEntriesByTime(start string, end string) ([]EPGEntryRow, error) {
-	// epg_entries.end_time > start AND epg_entries.start_time < end
 	rows, err := conn.Query(`SELECT id, channel_id, title, COALESCE(description,''), COALESCE(poster_url,''), start_time, end_time FROM epg_entries WHERE end_time > ? AND start_time < ? ORDER BY channel_id, start_time ASC`, start, end)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []EPGEntryRow
+	for rows.Next() {
+		var e EPGEntryRow
+		if err := rows.Scan(&e.ID, &e.ChannelID, &e.Title, &e.Description, &e.PosterURL, &e.StartTime, &e.EndTime); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func GetEPGEntriesByTimeAndSource(sourceID int, start string, end string) ([]EPGEntryRow, error) {
+	rows, err := conn.Query(`
+		SELECT e.id, e.channel_id, e.title, COALESCE(e.description,''), COALESCE(e.poster_url,''), e.start_time, e.end_time 
+		FROM epg_entries e
+		JOIN channels c ON e.channel_id = c.id
+		WHERE c.source_id = ? AND e.end_time > ? AND e.start_time < ? 
+		ORDER BY e.channel_id, e.start_time ASC
+	`, sourceID, start, end)
 	if err != nil {
 		return nil, err
 	}

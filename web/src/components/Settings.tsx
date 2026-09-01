@@ -110,6 +110,8 @@ export default function Settings() {
     uptime: string;
     active_streams: number;
     clients?: string[];
+    disk_total_gb?: number;
+    disk_free_gb?: number;
   } | null>(null);
   
   // Form State
@@ -942,7 +944,7 @@ export default function Settings() {
               <Activity className="w-5 h-5 text-blue-400" />
               System Monitor
             </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4">
               <div className="bg-neutral-900/50 border border-neutral-700/50 p-4 rounded-xl flex flex-col items-center justify-center text-center">
                 <span className="text-xs text-neutral-400 mb-1 uppercase tracking-wider font-semibold">Uptime</span>
                 <span className="text-lg sm:text-xl font-bold text-white">{systemStats?.uptime || '--'}</span>
@@ -958,6 +960,10 @@ export default function Settings() {
               <div className="bg-neutral-900/50 border border-neutral-700/50 p-4 rounded-xl flex flex-col items-center justify-center text-center">
                 <span className="text-xs text-neutral-400 mb-1 uppercase tracking-wider font-semibold">Active Streams</span>
                 <span className="text-lg sm:text-xl font-bold text-white">{systemStats?.active_streams || 0}</span>
+              </div>
+              <div className="bg-neutral-900/50 border border-neutral-700/50 p-4 rounded-xl flex flex-col items-center justify-center text-center col-span-2 sm:col-span-1">
+                <span className="text-xs text-neutral-400 mb-1 uppercase tracking-wider font-semibold">Storage Free</span>
+                <span className="text-lg sm:text-xl font-bold text-white">{systemStats?.disk_free_gb !== undefined ? `${systemStats.disk_free_gb} GB` : '--'}</span>
               </div>
             </div>
 

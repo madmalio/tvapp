@@ -47,6 +47,9 @@ scp .\bin\tvapp-linux mark@192.168.4.143:~/tvapp/tvapp
 # 3. Note: The user runs MediaMTX on the server and will restart tvapp manually.
 ```
 
+> **Ubuntu Server / Proxmox VM Note**: If deploying to a new Ubuntu Server VM and the app's System Tab shows significantly less "Storage Free" than allocated (e.g., 8GB instead of 40GB), this is due to Ubuntu's default LVM configuration only assigning a portion of the disk to the root volume. To fix this on the host machine before relying on the DVR, run:
+> `sudo lvextend -l +100%FREE /dev/mapper/ubuntu--vg-ubuntu--lv` followed by `sudo resize2fs /dev/mapper/ubuntu--vg-ubuntu--lv`. Keep this in mind when mapping Docker volumes in the future.
+
 ## Frontend Dev
 
 ```powershell

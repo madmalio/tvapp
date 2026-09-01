@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -64,12 +65,25 @@ func getSystemStats(w http.ResponseWriter, r *http.Request) {
 		return true
 	})
 
+	dvrPath := db.GetSetting("dvr_path", "recordings")
+	os.MkdirAll(dvrPath, 0755)
+	
+	absPath, _ := filepath.Abs(dvrPath)
+	totalSpace, freeSpace, err := getDiskSpace(absPath)
+	var diskTotalGB, diskFreeGB uint64
+	if err == nil {
+		diskTotalGB = totalSpace / 1024 / 1024 / 1024
+		diskFreeGB = freeSpace / 1024 / 1024 / 1024
+	}
+
 	stats := map[string]interface{}{
 		"goroutines":     runtime.NumGoroutine(),
 		"memory_mb":      mem.Alloc / 1024 / 1024,
 		"uptime":         uptimeStr,
 		"active_streams": stream.GetActiveStreamCount(),
 		"clients":        clients,
+		"disk_total_gb":  diskTotalGB,
+		"disk_free_gb":   diskFreeGB,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
