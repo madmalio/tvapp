@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, Pause, Volume2, VolumeX, Maximize, Minimize } from "lucide-react";
+import { ArrowLeft, Play, Pause, Volume2, VolumeX, Maximize, Minimize, Download } from "lucide-react";
 import Hls from "hls.js";
 import { getApiUrl } from "../lib/api";
 import { useApi } from "../hooks/useApi";
@@ -145,7 +145,13 @@ export default function RecordingPlayer() {
         <h2 className="text-white font-semibold shadow-black drop-shadow-md truncate max-w-[60vw]">
           {recording?.title || "Loading..."}
         </h2>
-        <div className="w-10"></div> {/* spacer for centering */}
+        {recording?.file_path ? (
+          <a href={getApiUrl(`/${recording.file_path}`)} download className="p-2 text-white hover:bg-white/20 rounded-full transition-colors cursor-pointer">
+            <Download className="w-6 h-6" />
+          </a>
+        ) : (
+          <div className="w-10"></div>
+        )}
       </div>
 
       {/* Bottom Controls */}

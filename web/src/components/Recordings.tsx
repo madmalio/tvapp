@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Trash2, Play, AlertCircle, CheckCircle2, Loader2, X, Square } from "lucide-react";
+import { Trash2, Play, AlertCircle, CheckCircle2, Loader2, X, Square, Download } from "lucide-react";
 import { useApi } from "../hooks/useApi";
 import { getApiUrl } from "../lib/api";
 
@@ -21,20 +21,21 @@ type Toast = {
   title: string;
   message?: string;
   type: "success" | "error" | "info" | "loading";
+  duration?: number;
 };
 
 export default function Recordings() {
   const navigate = useNavigate();
   const { data: recordings, refetch } = useApi<Recording[]>("/api/recordings");
-  const [activeTab, setActiveTab] = useState<"scheduled" | "completed">("scheduled");
+  const [activeTab, setActiveTab] = useState<"library" | "scheduled">("library");
   const [showDeleteModal, setShowDeleteModal] = useState<number | null>(null);
 
   // Toasts
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const addToast = useCallback((toast: Omit<Toast, 'id'>, duration = 4000) => {
+  const addToast = useCallback(({ title, message, type = 'info', duration = 3000 }: Omit<Toast, 'id'>) => {
     const id = Math.random().toString(36).substring(2, 9);
-    setToasts((prev) => [...prev, { ...toast, id }]);
+    setToasts((prev) => [...prev, { id, title, message, type, duration }]);
     if (duration > 0) {
       setTimeout(() => {
         setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -65,6 +66,9 @@ export default function Recordings() {
       : (r.status === "completed" || r.status === "failed")
   ) || [];
 
+  const scheduledCount = recordings?.filter(r => r.status === "scheduled" || r.status === "recording").length || 0;
+  const isCurrentlyRecording = recordings?.some(r => r.status === "recording") || false;
+
   return (
     <div className="flex-1 flex flex-col bg-neutral-950 p-6 md:pl-24 overflow-y-auto relative">
       <div className="max-w-4xl mx-auto w-full">
@@ -72,16 +76,21 @@ export default function Recordings() {
         
         <div className="flex gap-4 mb-6 border-b border-neutral-800 pb-2">
           <button
-            onClick={() => setActiveTab("scheduled")}
-            className={`pb-2 px-2 font-medium transition-colors ${activeTab === "scheduled" ? "text-blue-500 border-b-2 border-blue-500" : "text-neutral-400 hover:text-white"}`}
+            onClick={() => setActiveTab("library")}
+            className={`pb-2 px-2 font-medium transition-colors ${activeTab === "library" ? "text-blue-500 border-b-2 border-blue-500" : "text-neutral-400 hover:text-white"}`}
           >
-            Scheduled
+            Library
           </button>
           <button
-            onClick={() => setActiveTab("completed")}
-            className={`pb-2 px-2 font-medium transition-colors ${activeTab === "completed" ? "text-blue-500 border-b-2 border-blue-500" : "text-neutral-400 hover:text-white"}`}
+            onClick={() => setActiveTab("scheduled")}
+            className={`pb-2 px-2 font-medium transition-colors flex items-center gap-2 ${activeTab === "scheduled" ? "text-blue-500 border-b-2 border-blue-500" : "text-neutral-400 hover:text-white"}`}
           >
-            Completed
+            Scheduled
+            {scheduledCount > 0 && (
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${isCurrentlyRecording ? 'bg-red-600 text-white animate-pulse' : 'bg-neutral-800 text-neutral-300'}`}>
+                {scheduledCount}
+              </span>
+            )}
           </button>
         </div>
 
@@ -109,13 +118,23 @@ export default function Recordings() {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {r.status === "completed" && r.file_path && (
-                    <button 
-                      onClick={() => navigate(`/player/recording/${r.id}`)}
-                      className="p-2 bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white rounded-lg transition-colors cursor-pointer"
-                      title="Play Recording"
-                    >
-                      <Play className="w-5 h-5" />
-                    </button>
+                    <>
+                      <button 
+                        onClick={() => navigate(`/player/recording/${r.id}`)}
+                        className="p-2 bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white rounded-lg transition-colors cursor-pointer"
+                        title="Play Recording"
+                      >
+                        <Play className="w-5 h-5" />
+                      </button>
+                      <a 
+                        href={getApiUrl(`/${r.file_path}`)}
+                        download
+                        className="p-2 bg-green-600/20 text-green-400 hover:bg-green-600 hover:text-white rounded-lg transition-colors cursor-pointer flex items-center justify-center"
+                        title="Download Recording"
+                      >
+                        <Download className="w-5 h-5" />
+                      </a>
+                    </>
                   )}
                   {r.status === "recording" && (
                     <button 
