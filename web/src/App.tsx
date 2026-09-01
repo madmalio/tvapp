@@ -1,4 +1,6 @@
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { useEffect } from "react";
+import { getApiUrl } from "./lib/api";
 import Sidebar from "./components/Sidebar";
 import ChannelList from "./components/ChannelList";
 import EpgGrid from "./components/EpgGrid";
@@ -14,6 +16,16 @@ import { useSpeedTest } from "./hooks/useSpeedTest";
 export default function App() {
   useSpeedTest(); // Triggers the global speed test on first load
   const location = useLocation();
+
+  useEffect(() => {
+    const ping = () => {
+      fetch(getApiUrl('/api/system/ping'), { method: 'POST' }).catch(() => {});
+    };
+    ping();
+    const interval = window.setInterval(ping, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   const isPlayer = location.pathname.startsWith('/player') || (location.pathname.startsWith('/cameras/') && location.pathname !== '/cameras');
 
   return (

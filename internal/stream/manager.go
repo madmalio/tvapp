@@ -80,6 +80,16 @@ func ffmpegHeaders(rawURL string) string {
 	return fmt.Sprintf("User-Agent: %s\r\nReferer: %s\r\nOrigin: %s\r\nCookie: %s\r\n", userAgent, referer, origin, cookieStr)
 }
 
+
+func GetActiveStreamCount() int {
+	count := 0
+	sessions.Range(func(key, value interface{}) bool {
+		count++
+		return true
+	})
+	return count
+}
+
 func Start(rawURL string, tunerType string, quality string) (*Session, error) {
 	// Check for an active session with the same rawURL, tunerType, and quality
 	var existingSess *Session

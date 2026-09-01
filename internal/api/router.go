@@ -48,6 +48,14 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 	r.Post("/api/recordings", addRecording)
 	r.Post("/api/recordings/{id}/stop", stopRecording)
 	r.Delete("/api/recordings/{id}", deleteRecording)
+	
+	// System API
+	r.Get("/api/system/stats", getSystemStats)
+	r.Get("/api/system/backup", exportDatabase)
+	r.Post("/api/system/import", importDatabase)
+	r.Post("/api/system/wipe", wipeAllData)
+	r.Post("/api/system/ping", clientPing)
+
 	r.Get("/api/speedtest", speedtestHandler)
 	r.Get("/api/settings", getSettingsHandler)
 	r.Put("/api/settings", updateSettingsHandler)

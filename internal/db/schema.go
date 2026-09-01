@@ -24,6 +24,27 @@ func Close() {
 	}
 }
 
+func WipeAllData() error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	tables := []string{"epg_entries", "channels", "sources", "recordings", "settings"}
+	for _, t := range tables {
+		if _, err := tx.Exec("DELETE FROM " + t); err != nil {
+			return err
+		}
+	}
+	
+	if _, err := tx.Exec("DELETE FROM sqlite_sequence"); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
 func migrate() error {
 	// Wiped once for multi-source migration, removed so it doesn't wipe on every restart.
 
