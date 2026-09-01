@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Trash2, Play, AlertCircle, CheckCircle2, Loader2, X, Square, Download } from "lucide-react";
 import { useApi } from "../hooks/useApi";
-import { getApiUrl } from "../lib/api";
+import { getApiUrl, getApiHeaders } from "../lib/api";
 
 type Recording = {
   id: number;
@@ -50,7 +50,7 @@ export default function Recordings() {
 
   const deleteRecording = async (id: number) => {
     try {
-      await fetch(getApiUrl(`/api/recordings/${id}`), { method: "DELETE" });
+      await fetch(getApiUrl(`/api/recordings/${id}`), { method: "DELETE", headers: getApiHeaders() });
       refetch();
       addToast({ title: "Recording Deleted", type: "success" });
     } catch (err) {
@@ -70,8 +70,8 @@ export default function Recordings() {
   const isCurrentlyRecording = recordings?.some(r => r.status === "recording") || false;
 
   return (
-    <div className="flex-1 flex flex-col bg-neutral-950 p-6 md:pl-24 overflow-y-auto relative">
-      <div className="max-w-4xl mx-auto w-full">
+    <div className="flex-1 flex flex-col bg-neutral-950 px-4 sm:px-6 md:pl-28 md:pr-12 pt-6 sm:pt-8 pb-20 md:pb-8 overflow-y-auto relative w-full">
+      <div className="w-full">
         <h1 className="text-3xl font-bold text-white mb-6">Recordings</h1>
         
         <div className="flex gap-4 mb-6 border-b border-neutral-800 pb-2">
@@ -140,7 +140,7 @@ export default function Recordings() {
                     <button 
                       onClick={async () => {
                         try {
-                          await fetch(getApiUrl(`/api/recordings/${r.id}/stop`), { method: "POST" });
+                          await fetch(getApiUrl(`/api/recordings/${r.id}/stop`), { method: "POST", headers: getApiHeaders() });
                           refetch();
                           addToast({ title: "Recording Stopped", type: "success" });
                         } catch (err) {

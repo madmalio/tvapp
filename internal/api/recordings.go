@@ -17,8 +17,18 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+func getProfileID(r *http.Request) int {
+	pidStr := r.Header.Get("X-Profile-ID")
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil || pid <= 0 {
+		return 1 // Default to profile 1
+	}
+	return pid
+}
+
 func getRecordings(w http.ResponseWriter, r *http.Request) {
-	recordings, err := db.GetRecordings()
+	pid := getProfileID(r)
+	recordings, err := db.GetRecordings(pid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -57,6 +67,7 @@ func addRecording(w http.ResponseWriter, r *http.Request) {
 	if rec.Status == "" {
 		rec.Status = "scheduled"
 	}
+	rec.ProfileID = getProfileID(r)
 	if err := db.SaveRecording(&rec); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

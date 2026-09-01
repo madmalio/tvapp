@@ -49,12 +49,23 @@ func migrate() error {
 	// Wiped once for multi-source migration, removed so it doesn't wipe on every restart.
 
 	schema := `
+	CREATE TABLE IF NOT EXISTS profiles (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		name       TEXT NOT NULL,
+		avatar_url TEXT,
+		is_admin   BOOLEAN DEFAULT 0,
+		pin        TEXT DEFAULT '',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
 	CREATE TABLE IF NOT EXISTS sources (
 		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		profile_id  INTEGER REFERENCES profiles(id) ON DELETE CASCADE,
 		name        TEXT NOT NULL,
 		type        TEXT NOT NULL, -- 'iptv' or 'hdhomerun'
 		url         TEXT NOT NULL,
 		epg_url     TEXT,
+		sort_order  INTEGER DEFAULT 0,
 		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
@@ -81,13 +92,6 @@ func migrate() error {
 		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
-	CREATE TABLE IF NOT EXISTS favorites (
-		id         INTEGER PRIMARY KEY AUTOINCREMENT,
-		channel_id INTEGER UNIQUE REFERENCES channels(id) ON DELETE CASCADE,
-		position   INTEGER DEFAULT 0,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	);
-
 	CREATE TABLE IF NOT EXISTS settings (
 		key   TEXT PRIMARY KEY,
 		value TEXT NOT NULL
@@ -95,6 +99,7 @@ func migrate() error {
 
 	CREATE TABLE IF NOT EXISTS recordings (
 		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		profile_id  INTEGER REFERENCES profiles(id) ON DELETE CASCADE,
 		channel_id  INTEGER REFERENCES channels(id) ON DELETE CASCADE,
 		epg_id      INTEGER,
 		title       TEXT NOT NULL,
@@ -113,10 +118,23 @@ func migrate() error {
 	if err != nil {
 		return err
 	}
-	
-	// Ensure sort_order exists
-	conn.Exec(`ALTER TABLE sources ADD COLUMN sort_order INTEGER DEFAULT 0`)
 
+	// Migrations
+	conn.Exec(`ALTER TABLE profiles ADD COLUMN pin TEXT DEFAULT ''`)
+
+	// Recreate favorites table properly
+	conn.Exec(`DROP TABLE IF EXISTS favorites`)
+	conn.Exec(`
+		CREATE TABLE IF NOT EXISTS favorites (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			profile_id INTEGER REFERENCES profiles(id) ON DELETE CASCADE,
+			channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
+			position   INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(profile_id, channel_id)
+		)
+	`)
+	
 	// Clean up old RTSP channels from previous implementation
 	conn.Exec(`DELETE FROM channels WHERE tuner_type = 'rtsp' OR group_title = 'Cameras' OR source_id IN (SELECT id FROM sources WHERE type = 'rtsp')`)
 
@@ -126,6 +144,7 @@ func migrate() error {
 
 type SourceRow struct {
 	ID        int    `json:"id"`
+	ProfileID *int   `json:"profile_id"`
 	Name      string `json:"name"`
 	Type      string `json:"type"`
 	URL       string `json:"url"`
@@ -133,7 +152,7 @@ type SourceRow struct {
 }
 
 func SaveSource(s *SourceRow) error {
-	res, err := conn.Exec(`INSERT INTO sources(name, type, url, epg_url) VALUES(?, ?, ?, ?)`, s.Name, s.Type, s.URL, s.EpgURL)
+	res, err := conn.Exec(`INSERT INTO sources(profile_id, name, type, url, epg_url) VALUES(?, ?, ?, ?, ?)`, s.ProfileID, s.Name, s.Type, s.URL, s.EpgURL)
 	if err != nil {
 		return err
 	}
@@ -144,8 +163,8 @@ func SaveSource(s *SourceRow) error {
 	return err
 }
 
-func GetSources() ([]SourceRow, error) {
-	rows, err := conn.Query(`SELECT id, name, type, url, COALESCE(epg_url,'') FROM sources ORDER BY sort_order ASC, id ASC`)
+func GetSources(profileID int) ([]SourceRow, error) {
+	rows, err := conn.Query(`SELECT id, profile_id, name, type, url, COALESCE(epg_url,'') FROM sources WHERE profile_id = ? OR type = 'rtsp' ORDER BY sort_order ASC, id ASC`, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +173,25 @@ func GetSources() ([]SourceRow, error) {
 	var out []SourceRow
 	for rows.Next() {
 		var s SourceRow
-		if err := rows.Scan(&s.ID, &s.Name, &s.Type, &s.URL, &s.EpgURL); err != nil {
+		if err := rows.Scan(&s.ID, &s.ProfileID, &s.Name, &s.Type, &s.URL, &s.EpgURL); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func GetAllSources() ([]SourceRow, error) {
+	rows, err := conn.Query(`SELECT id, profile_id, name, type, url, COALESCE(epg_url,'') FROM sources ORDER BY sort_order ASC, id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []SourceRow
+	for rows.Next() {
+		var s SourceRow
+		if err := rows.Scan(&s.ID, &s.ProfileID, &s.Name, &s.Type, &s.URL, &s.EpgURL); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -163,16 +200,16 @@ func GetSources() ([]SourceRow, error) {
 }
 
 func GetSource(id int) (*SourceRow, error) {
-	row := conn.QueryRow(`SELECT id, name, type, url, COALESCE(epg_url,'') FROM sources WHERE id = ?`, id)
+	row := conn.QueryRow(`SELECT id, profile_id, name, type, url, COALESCE(epg_url,'') FROM sources WHERE id = ?`, id)
 	var s SourceRow
-	if err := row.Scan(&s.ID, &s.Name, &s.Type, &s.URL, &s.EpgURL); err != nil {
+	if err := row.Scan(&s.ID, &s.ProfileID, &s.Name, &s.Type, &s.URL, &s.EpgURL); err != nil {
 		return nil, err
 	}
 	return &s, nil
 }
 
 func UpdateSource(s *SourceRow) error {
-	_, err := conn.Exec(`UPDATE sources SET name=?, type=?, url=?, epg_url=? WHERE id=?`, s.Name, s.Type, s.URL, s.EpgURL, s.ID)
+	_, err := conn.Exec(`UPDATE sources SET profile_id=?, name=?, type=?, url=?, epg_url=? WHERE id=?`, s.ProfileID, s.Name, s.Type, s.URL, s.EpgURL, s.ID)
 	return err
 }
 
@@ -323,8 +360,24 @@ func SyncChannels(sourceID int, newChannels []ChannelRow) error {
 	return tx.Commit()
 }
 
-func GetChannels() ([]ChannelRow, error) {
-	rows, err := conn.Query(`SELECT id, source_id, name, stream_url, COALESCE(logo_url,''), COALESCE(group_title,''), tuner_type, COALESCE(tvg_id,'') FROM channels ORDER BY id`)
+func GetChannels(profileID int) ([]ChannelRow, error) {
+	query := `
+		SELECT c.id, c.source_id, c.name, c.stream_url, COALESCE(c.logo_url,''), COALESCE(c.group_title,''), c.tuner_type, COALESCE(c.tvg_id,'') 
+		FROM channels c
+		JOIN sources s ON c.source_id = s.id
+	`
+	
+	var rows *sql.Rows
+	var err error
+	
+	if profileID > 0 {
+		query += ` WHERE s.profile_id = ? ORDER BY c.id`
+		rows, err = conn.Query(query, profileID)
+	} else {
+		query += ` ORDER BY c.id`
+		rows, err = conn.Query(query)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -443,50 +496,96 @@ func GetEPGEntries(channelID int) ([]EPGEntryRow, error) {
 	return out, rows.Err()
 }
 
-func GetAllEPGEntries() ([]EPGEntryRow, error) {
-	rows, err := conn.Query(`SELECT id, channel_id, title, COALESCE(description,''), COALESCE(poster_url,''), start_time, end_time FROM epg_entries ORDER BY channel_id, start_time ASC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []EPGEntryRow
-	for rows.Next() {
-		var e EPGEntryRow
-		if err := rows.Scan(&e.ID, &e.ChannelID, &e.Title, &e.Description, &e.PosterURL, &e.StartTime, &e.EndTime); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
-}
-
-func GetEPGEntriesByTime(start string, end string) ([]EPGEntryRow, error) {
-	rows, err := conn.Query(`SELECT id, channel_id, title, COALESCE(description,''), COALESCE(poster_url,''), start_time, end_time FROM epg_entries WHERE end_time > ? AND start_time < ? ORDER BY channel_id, start_time ASC`, start, end)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []EPGEntryRow
-	for rows.Next() {
-		var e EPGEntryRow
-		if err := rows.Scan(&e.ID, &e.ChannelID, &e.Title, &e.Description, &e.PosterURL, &e.StartTime, &e.EndTime); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
-}
-
-func GetEPGEntriesByTimeAndSource(sourceID int, start string, end string) ([]EPGEntryRow, error) {
-	rows, err := conn.Query(`
+func GetAllEPGEntries(profileID int) ([]EPGEntryRow, error) {
+	query := `
 		SELECT e.id, e.channel_id, e.title, COALESCE(e.description,''), COALESCE(e.poster_url,''), e.start_time, e.end_time 
 		FROM epg_entries e
 		JOIN channels c ON e.channel_id = c.id
-		WHERE c.source_id = ? AND e.end_time > ? AND e.start_time < ? 
-		ORDER BY e.channel_id, e.start_time ASC
-	`, sourceID, start, end)
+		JOIN sources s ON c.source_id = s.id
+	`
+	
+	var rows *sql.Rows
+	var err error
+	
+	if profileID > 0 {
+		query += ` WHERE s.profile_id = ? ORDER BY e.channel_id, e.start_time ASC`
+		rows, err = conn.Query(query, profileID)
+	} else {
+		query += ` ORDER BY e.channel_id, e.start_time ASC`
+		rows, err = conn.Query(query)
+	}
+	
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []EPGEntryRow
+	for rows.Next() {
+		var e EPGEntryRow
+		if err := rows.Scan(&e.ID, &e.ChannelID, &e.Title, &e.Description, &e.PosterURL, &e.StartTime, &e.EndTime); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func GetEPGEntriesByTime(start string, end string, profileID int) ([]EPGEntryRow, error) {
+	query := `
+		SELECT e.id, e.channel_id, e.title, COALESCE(e.description,''), COALESCE(e.poster_url,''), e.start_time, e.end_time 
+		FROM epg_entries e
+		JOIN channels c ON e.channel_id = c.id
+		JOIN sources s ON c.source_id = s.id
+		WHERE (e.end_time > ? AND e.start_time < ?)
+	`
+	
+	var rows *sql.Rows
+	var err error
+	
+	if profileID > 0 {
+		query += ` AND s.profile_id = ? ORDER BY e.channel_id, e.start_time ASC`
+		rows, err = conn.Query(query, start, end, profileID)
+	} else {
+		query += ` ORDER BY e.channel_id, e.start_time ASC`
+		rows, err = conn.Query(query, start, end)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []EPGEntryRow
+	for rows.Next() {
+		var e EPGEntryRow
+		if err := rows.Scan(&e.ID, &e.ChannelID, &e.Title, &e.Description, &e.PosterURL, &e.StartTime, &e.EndTime); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func GetEPGEntriesByTimeAndSource(sourceID int, start string, end string, profileID int) ([]EPGEntryRow, error) {
+	query := `
+		SELECT e.id, e.channel_id, e.title, COALESCE(e.description,''), COALESCE(e.poster_url,''), e.start_time, e.end_time 
+		FROM epg_entries e
+		JOIN channels c ON e.channel_id = c.id
+		JOIN sources s ON c.source_id = s.id
+		WHERE c.source_id = ? AND e.end_time > ? AND e.start_time < ?
+	`
+	
+	var rows *sql.Rows
+	var err error
+	
+	if profileID > 0 {
+		query += ` AND s.profile_id = ? ORDER BY e.channel_id, e.start_time ASC`
+		rows, err = conn.Query(query, sourceID, start, end, profileID)
+	} else {
+		query += ` ORDER BY e.channel_id, e.start_time ASC`
+		rows, err = conn.Query(query, sourceID, start, end)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -536,6 +635,7 @@ func GetAllSettings() (map[string]string, error) {
 
 type RecordingRow struct {
 	ID        int    `json:"id"`
+	ProfileID int    `json:"profile_id"`
 	ChannelID int    `json:"channel_id"`
 	EpgID     int    `json:"epg_id,omitempty"`
 	Title     string `json:"title"`
@@ -547,8 +647,8 @@ type RecordingRow struct {
 }
 
 func SaveRecording(r *RecordingRow) error {
-	res, err := conn.Exec(`INSERT INTO recordings(channel_id, epg_id, title, start_time, end_time, status) VALUES(?, ?, ?, ?, ?, ?)`,
-		r.ChannelID, r.EpgID, r.Title, r.StartTime, r.EndTime, r.Status)
+	res, err := conn.Exec(`INSERT INTO recordings(profile_id, channel_id, epg_id, title, start_time, end_time, status) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+		r.ProfileID, r.ChannelID, r.EpgID, r.Title, r.StartTime, r.EndTime, r.Status)
 	if err != nil {
 		return err
 	}
@@ -559,8 +659,8 @@ func SaveRecording(r *RecordingRow) error {
 	return err
 }
 
-func GetRecordings() ([]RecordingRow, error) {
-	rows, err := conn.Query(`SELECT id, channel_id, COALESCE(epg_id, 0), title, start_time, end_time, status, COALESCE(file_path, ''), created_at FROM recordings ORDER BY start_time ASC`)
+func GetRecordings(profileID int) ([]RecordingRow, error) {
+	rows, err := conn.Query(`SELECT id, profile_id, channel_id, COALESCE(epg_id, 0), title, start_time, end_time, status, COALESCE(file_path, ''), created_at FROM recordings WHERE profile_id = ? ORDER BY start_time ASC`, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -569,7 +669,25 @@ func GetRecordings() ([]RecordingRow, error) {
 	var out []RecordingRow
 	for rows.Next() {
 		var r RecordingRow
-		if err := rows.Scan(&r.ID, &r.ChannelID, &r.EpgID, &r.Title, &r.StartTime, &r.EndTime, &r.Status, &r.FilePath, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.ProfileID, &r.ChannelID, &r.EpgID, &r.Title, &r.StartTime, &r.EndTime, &r.Status, &r.FilePath, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func GetAllRecordings() ([]RecordingRow, error) {
+	rows, err := conn.Query(`SELECT id, profile_id, channel_id, COALESCE(epg_id, 0), title, start_time, end_time, status, COALESCE(file_path, ''), created_at FROM recordings ORDER BY start_time ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RecordingRow
+	for rows.Next() {
+		var r RecordingRow
+		if err := rows.Scan(&r.ID, &r.ProfileID, &r.ChannelID, &r.EpgID, &r.Title, &r.StartTime, &r.EndTime, &r.Status, &r.FilePath, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -578,9 +696,9 @@ func GetRecordings() ([]RecordingRow, error) {
 }
 
 func GetRecording(id int) (*RecordingRow, error) {
-	row := conn.QueryRow(`SELECT id, channel_id, COALESCE(epg_id, 0), title, start_time, end_time, status, COALESCE(file_path, ''), created_at FROM recordings WHERE id = ?`, id)
+	row := conn.QueryRow(`SELECT id, profile_id, channel_id, COALESCE(epg_id, 0), title, start_time, end_time, status, COALESCE(file_path, ''), created_at FROM recordings WHERE id = ?`, id)
 	var r RecordingRow
-	if err := row.Scan(&r.ID, &r.ChannelID, &r.EpgID, &r.Title, &r.StartTime, &r.EndTime, &r.Status, &r.FilePath, &r.CreatedAt); err != nil {
+	if err := row.Scan(&r.ID, &r.ProfileID, &r.ChannelID, &r.EpgID, &r.Title, &r.StartTime, &r.EndTime, &r.Status, &r.FilePath, &r.CreatedAt); err != nil {
 		return nil, err
 	}
 	return &r, nil
@@ -593,5 +711,66 @@ func UpdateRecordingStatus(id int, status string, filePath string) error {
 
 func DeleteRecording(id int) error {
 	_, err := conn.Exec(`DELETE FROM recordings WHERE id = ?`, id)
+	return err
+}
+
+type ProfileRow struct {
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatar_url"`
+	IsAdmin   bool   `json:"is_admin"`
+	HasPin    bool   `json:"has_pin"`
+	Pin       string `json:"-"`
+	CreatedAt string `json:"created_at,omitempty"`
+}
+
+func GetProfiles() ([]ProfileRow, error) {
+	rows, err := conn.Query(`SELECT id, name, avatar_url, is_admin, pin, created_at FROM profiles ORDER BY id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []ProfileRow
+	for rows.Next() {
+		var p ProfileRow
+		if err := rows.Scan(&p.ID, &p.Name, &p.AvatarURL, &p.IsAdmin, &p.Pin, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		p.HasPin = (p.Pin != "")
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func GetProfile(id int) (*ProfileRow, error) {
+	row := conn.QueryRow(`SELECT id, name, avatar_url, is_admin, pin, created_at FROM profiles WHERE id = ?`, id)
+	var p ProfileRow
+	if err := row.Scan(&p.ID, &p.Name, &p.AvatarURL, &p.IsAdmin, &p.Pin, &p.CreatedAt); err != nil {
+		return nil, err
+	}
+	p.HasPin = (p.Pin != "")
+	return &p, nil
+}
+
+func SaveProfile(p *ProfileRow) error {
+	res, err := conn.Exec(`INSERT INTO profiles (name, avatar_url, is_admin, pin) VALUES (?, ?, ?, ?)`, p.Name, p.AvatarURL, p.IsAdmin, p.Pin)
+	if err != nil {
+		return err
+	}
+	id, err := res.LastInsertId()
+	if err == nil {
+		p.ID = int(id)
+	}
+	return err
+}
+
+func UpdateProfile(p *ProfileRow) error {
+	_, err := conn.Exec(`UPDATE profiles SET name = ?, avatar_url = ?, is_admin = ?, pin = ? WHERE id = ?`, p.Name, p.AvatarURL, p.IsAdmin, p.Pin, p.ID)
+	return err
+}
+
+func DeleteProfile(id int) error {
+	_, err := conn.Exec(`DELETE FROM profiles WHERE id=?`, id)
 	return err
 }

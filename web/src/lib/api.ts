@@ -12,16 +12,40 @@ export function getApiUrl(path: string): string {
   return path;
 }
 
+export function getActiveProfileId(): string {
+  return localStorage.getItem('tvapp_active_profile_id') || '1';
+}
+
+export function getApiHeaders(): HeadersInit {
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+  };
+  const token = localStorage.getItem('tvapp_auth_token');
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  // Fallback for transition
+  const profileId = getActiveProfileId();
+  if (profileId) {
+    headers['X-Profile-ID'] = profileId;
+  }
+  return headers;
+}
+
 const cache: Record<string, { data: any, timestamp: number }> = {};
 
 export async function fetchWithCache(url: string, ttl = 5 * 60 * 1000) {
-  if (cache[url] && Date.now() - cache[url].timestamp < ttl) {
-    return cache[url].data;
+  // Append profile ID to cache key to isolate cache per-profile
+  const profileId = getActiveProfileId();
+  const cacheKey = `${profileId}:${url}`;
+
+  if (cache[cacheKey] && Date.now() - cache[cacheKey].timestamp < ttl) {
+    return cache[cacheKey].data;
   }
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: getApiHeaders() });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
-  cache[url] = { data, timestamp: Date.now() };
+  cache[cacheKey] = { data, timestamp: Date.now() };
   return data;
 }
 

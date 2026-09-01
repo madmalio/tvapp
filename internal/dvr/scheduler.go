@@ -30,7 +30,7 @@ func runScheduler() {
 }
 
 func checkRecordings() {
-	recs, err := db.GetRecordings()
+	recs, err := db.GetAllRecordings()
 	if err != nil {
 		log.Printf("[dvr] failed to get recordings: %v", err)
 		return

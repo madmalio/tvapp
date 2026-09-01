@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { getApiUrl } from "../lib/api";
 import { useApi } from "../hooks/useApi";
 import { 
@@ -924,10 +924,10 @@ export default function Cameras() {
       >
         {/* Header */}
         <div className="mb-6 sm:mb-8">
-          <h1 className="text-2xl sm:text-3xl md:text-5xl font-extrabold text-white tracking-tight drop-shadow-lg">
+          <h1 className="text-3xl font-bold text-white mb-2">
             Security Cameras
           </h1>
-          <p className="text-neutral-400 mt-1 sm:mt-2 text-sm sm:text-base md:text-lg">
+          <p className="text-neutral-400 text-sm sm:text-base">
             Live feeds from your RTSP security cameras
           </p>
         </div>
@@ -943,12 +943,17 @@ export default function Cameras() {
         )}
 
         {!loading && !error && cameras.length === 0 && (
-          <div className="bg-neutral-900/50 backdrop-blur-xl border border-neutral-800 rounded-2xl p-8 sm:p-12 max-w-md text-center mx-auto">
-            <Video className="w-12 h-12 text-neutral-600 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold mb-3 text-white">No Cameras Found</h2>
-            <p className="text-neutral-400 mb-6 text-sm sm:text-base">
-              You haven't added any security cameras yet. Head over to Settings to add an RTSP camera stream.
-            </p>
+          <div className="flex flex-col items-center justify-center mt-12 sm:mt-24">
+            <div className="bg-neutral-900/50 backdrop-blur-xl border border-neutral-800 rounded-2xl p-8 sm:p-12 max-w-md text-center mx-auto">
+              <Video className="w-12 h-12 text-neutral-600 mx-auto mb-4" />
+              <h2 className="text-2xl font-bold mb-3 text-white">No Cameras Found</h2>
+              <p className="text-neutral-400 mb-6 text-sm sm:text-base">
+                You haven't added any security cameras yet. Head over to Settings to add an RTSP camera stream.
+              </p>
+              <Link to="/settings" className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors cursor-pointer inline-block">
+                Go to Settings
+              </Link>
+            </div>
           </div>
         )}
 

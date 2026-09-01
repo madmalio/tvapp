@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { getApiUrl } from "../lib/api";
+import { getApiUrl, getApiHeaders } from "../lib/api";
 
 export function useApi<T>(url: string) {
   const [data, setData] = useState<T | null>(null);
@@ -10,7 +10,7 @@ export function useApi<T>(url: string) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(getApiUrl(url));
+      const res = await fetch(getApiUrl(url), { headers: getApiHeaders() });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setData(await res.json());
     } catch (e: unknown) {

@@ -33,35 +33,61 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 
 	r.Get("/health", healthHandler)
 	r.Get("/api/devices", listDevicesHandler)
-	r.Get("/api/channels", listChannelsHandler)
-	r.Get("/api/channels/{id}", getChannelHandler)
-	r.Get("/api/proxy", proxyStreamHandler)
-	r.Get("/api/sources", getSourcesHandler)
-	r.Post("/api/sources", addSourceHandler)
-	r.Post("/api/sources/refresh-all", refreshAllSourcesHandler)
-	r.Post("/api/sources/{id}/refresh", refreshSourceHandler)
-	r.Put("/api/sources/order", updateSourceOrderHandler)
-	r.Put("/api/sources/{id}", updateSourceHandler)
-	r.Delete("/api/sources/{id}", deleteSourceHandler)
-	r.Get("/api/epg", getEpgHandler)
-	r.Get("/api/recordings", getRecordings)
-	r.Get("/api/recordings/{id}", getRecording)
-	r.Post("/api/recordings", addRecording)
-	r.Post("/api/recordings/{id}/stop", stopRecording)
-	r.Delete("/api/recordings/{id}", deleteRecording)
 	
-	// System API
-	r.Get("/api/system/stats", getSystemStats)
-	r.Get("/api/system/backup", exportDatabase)
-	r.Post("/api/system/import", importDatabase)
-	r.Post("/api/system/wipe", wipeAllData)
-	r.Post("/api/system/ping", clientPing)
+	// Unprotected setup endpoint for first-time use
+	r.Post("/api/setup", setupAdminHandler)
+	// Unprotected profile listing (so user can pick a profile)
+	r.Get("/api/profiles", getProfilesHandler)
+	// Auth login
+	r.Post("/api/auth/login", loginHandler)
+	
+	// HLS streaming proxy
+	r.Get("/api/proxy", proxyStreamHandler)
 
-	r.Get("/api/speedtest", speedtestHandler)
-	r.Get("/api/settings", getSettingsHandler)
-	r.Put("/api/settings", updateSettingsHandler)
-	r.Post("/api/stream/start", startStreamHandler)
-	r.Delete("/api/stream/stop/{id}", stopStreamHandler)
+	// Protected Routes
+	r.Group(func(r chi.Router) {
+		r.Use(RequireAuth)
+		
+		r.Get("/api/channels", listChannelsHandler)
+		r.Get("/api/channels/{id}", getChannelHandler)
+		r.Get("/api/sources", getSourcesHandler)
+		r.Get("/api/epg", getEpgHandler)
+		
+		r.Get("/api/recordings", getRecordings)
+		r.Get("/api/recordings/{id}", getRecording)
+		
+		// Admin Only Routes
+		r.Group(func(r chi.Router) {
+			r.Use(RequireAdmin)
+			
+			r.Post("/api/sources", addSourceHandler)
+			r.Post("/api/sources/refresh-all", refreshAllSourcesHandler)
+			r.Post("/api/sources/{id}/refresh", refreshSourceHandler)
+			r.Put("/api/sources/order", updateSourceOrderHandler)
+			r.Put("/api/sources/{id}", updateSourceHandler)
+			r.Delete("/api/sources/{id}", deleteSourceHandler)
+
+			r.Post("/api/profiles", addProfileHandler)
+			r.Put("/api/profiles/{id}", updateProfileHandler)
+			r.Delete("/api/profiles/{id}", deleteProfileHandler)
+
+			r.Post("/api/recordings", addRecording)
+			r.Post("/api/recordings/{id}/stop", stopRecording)
+			r.Delete("/api/recordings/{id}", deleteRecording)
+			
+			r.Get("/api/system/stats", getSystemStats)
+			r.Get("/api/system/backup", exportDatabase)
+			r.Post("/api/system/import", importDatabase)
+			r.Post("/api/system/wipe", wipeAllData)
+			r.Post("/api/system/ping", clientPing)
+			
+			r.Get("/api/speedtest", speedtestHandler)
+			r.Get("/api/settings", getSettingsHandler)
+			r.Put("/api/settings", updateSettingsHandler)
+			r.Post("/api/stream/start", startStreamHandler)
+			r.Delete("/api/stream/stop/{id}", stopStreamHandler)
+		})
+	})
 	r.Get("/api/stream/heartbeat/{id}", heartbeatStreamHandler)
 	r.Get("/api/stream/hls/*", serveHLSHandler)
 
@@ -118,7 +144,8 @@ func listDevicesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func listChannelsHandler(w http.ResponseWriter, r *http.Request) {
-	channels, err := db.GetChannels()
+	profileID, _ := strconv.Atoi(r.Header.Get("X-Profile-ID"))
+	channels, err := db.GetChannels(profileID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -616,15 +643,17 @@ func getEpgHandler(w http.ResponseWriter, r *http.Request) {
 	var entries []db.EPGEntryRow
 	var err error
 
+	profileID, _ := strconv.Atoi(r.Header.Get("X-Profile-ID"))
+
 	if start != "" && end != "" {
 		if sourceIDStr != "" {
 			sourceID, _ := strconv.Atoi(sourceIDStr)
-			entries, err = db.GetEPGEntriesByTimeAndSource(sourceID, start, end)
+			entries, err = db.GetEPGEntriesByTimeAndSource(sourceID, start, end, profileID)
 		} else {
-			entries, err = db.GetEPGEntriesByTime(start, end)
+			entries, err = db.GetEPGEntriesByTime(start, end, profileID)
 		}
 	} else {
-		entries, err = db.GetAllEPGEntries()
+		entries, err = db.GetAllEPGEntries(profileID)
 	}
 
 	if err != nil {

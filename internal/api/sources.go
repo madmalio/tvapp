@@ -63,7 +63,15 @@ func RegisterAllRTSPCameras() {
 }
 
 func getSourcesHandler(w http.ResponseWriter, r *http.Request) {
-	sources, err := db.GetSources()
+	profileIdStr := r.Header.Get("X-Profile-ID")
+	profileID, _ := strconv.Atoi(profileIdStr)
+	
+	if profileID == 0 {
+		http.Error(w, "missing or invalid X-Profile-ID", http.StatusBadRequest)
+		return
+	}
+
+	sources, err := db.GetSources(profileID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -100,6 +108,18 @@ func addSourceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.Type != "rtsp" {
+		profileIdStr := r.Header.Get("X-Profile-ID")
+		profileID, _ := strconv.Atoi(profileIdStr)
+		if profileID == 0 {
+			http.Error(w, "missing X-Profile-ID for non-rtsp source", http.StatusBadRequest)
+			return
+		}
+		s.ProfileID = &profileID
+	} else {
+		s.ProfileID = nil
+	}
+
 	if err := db.SaveSource(&s); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -124,6 +144,18 @@ func updateSourceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.ID = id
+
+	if s.Type != "rtsp" {
+		profileIdStr := r.Header.Get("X-Profile-ID")
+		profileID, _ := strconv.Atoi(profileIdStr)
+		if profileID == 0 {
+			http.Error(w, "missing X-Profile-ID for non-rtsp source", http.StatusBadRequest)
+			return
+		}
+		s.ProfileID = &profileID
+	} else {
+		s.ProfileID = nil
+	}
 
 	if err := db.UpdateSource(&s); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -154,7 +186,14 @@ func refreshSourceHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func refreshAllSourcesHandler(w http.ResponseWriter, r *http.Request) {
-	sources, err := db.GetSources()
+	profileIdStr := r.Header.Get("X-Profile-ID")
+	profileID, _ := strconv.Atoi(profileIdStr)
+	if profileID == 0 {
+		http.Error(w, "missing or invalid X-Profile-ID", http.StatusBadRequest)
+		return
+	}
+
+	sources, err := db.GetSources(profileID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -234,7 +273,11 @@ func parseSource(s db.SourceRow) {
 			}
 
 			// We need fresh channels to map IDs
-			savedChannels, _ := db.GetChannels()
+			profileID := 0
+			if s.ProfileID != nil {
+				profileID = *s.ProfileID
+			}
+			savedChannels, _ := db.GetChannels(profileID)
 			channelMap := make(map[string]int)
 			channelNameMap := make(map[string]int)
 			for _, ch := range savedChannels {
@@ -321,7 +364,11 @@ func parseSource(s db.SourceRow) {
 		}
 
 		// Map channels back to IDs (XMLTV uses GuideNumber or GuideName for ChannelID)
-		savedChannels, _ := db.GetChannels()
+		profileID := 0
+		if s.ProfileID != nil {
+			profileID = *s.ProfileID
+		}
+		savedChannels, _ := db.GetChannels(profileID)
 
 		epgRows := []db.EPGEntryRow{}
 		channelUpdates := make(map[int]*db.ChannelRow)
@@ -461,7 +508,7 @@ func StartNightlySync() {
 
 	syncTimer = time.AfterFunc(d, func() {
 		log.Println("[sync] performing nightly background source sync...")
-		if sources, err := db.GetSources(); err == nil {
+		if sources, err := db.GetAllSources(); err == nil {
 			for _, s := range sources {
 				parseSource(s)
 			}

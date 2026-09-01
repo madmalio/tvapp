@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, startTransition, useRef } from "react";
 import { Link } from "react-router-dom";
-import { getApiUrl, fetchWithCache } from "../lib/api";
+import { getApiUrl, fetchWithCache, getApiHeaders } from "../lib/api";
 import { useApi } from "../hooks/useApi";
 import { Tv, CheckCircle2, AlertCircle, Loader2, X } from "lucide-react";
 import { lockToLandscape } from "../lib/orientation";
@@ -54,7 +54,7 @@ function mapCategory(rawGroup: string, channelName: string = ""): string {
 }
 
 export default function EpgGrid() {
-  const { data: sourcesData } = useApi<Source[]>('/api/sources');
+  const { data: sourcesData, loading: sourcesLoading } = useApi<Source[]>('/api/sources');
   const { data: recordings, refetch: refetchRecordings } = useApi<Recording[]>('/api/recordings');
   const scheduledKeys = useMemo(() => {
     const set = new Set<string>();
@@ -137,6 +137,10 @@ export default function EpgGrid() {
   const [durationHours, setDurationHours] = useState(6);
 
   useEffect(() => {
+    if (!sourcesLoading && (!sources || sources.length === 0)) {
+      setLoading(false);
+      return;
+    }
     if (!activeSourceId) return;
     if (channels.length === 0) setLoading(true);
     
@@ -154,7 +158,7 @@ export default function EpgGrid() {
       setEntries(epgData || []);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [currentHour, durationHours, activeSourceId]);
+  }, [currentHour, durationHours, activeSourceId, sourcesLoading, sources.length]);
 
   const epgByChannel = useMemo(() => {
     const map: Record<number, EPGEntry[]> = {};
@@ -486,7 +490,7 @@ export default function EpgGrid() {
                         && (r.status === 'scheduled' || r.status === 'recording')
                       );
                       if (rec) {
-                        fetch(getApiUrl(`/api/recordings/${rec.id}`), { method: 'DELETE' }).then(() => {
+                        fetch(getApiUrl(`/api/recordings/${rec.id}`), { method: 'DELETE', headers: getApiHeaders() }).then(() => {
                           addToast({ title: "Recording cancelled", type: "success" });
                           setSelectedProgram(null);
                           refetchRecordings();
@@ -503,7 +507,7 @@ export default function EpgGrid() {
                       const isLive = new Date(selectedProgram.entry.start_time) <= currentTime;
                       fetch(getApiUrl('/api/recordings'), {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'application/json', ...getApiHeaders() as Record<string, string> },
                         body: JSON.stringify({
                           channel_id: selectedProgram.channel.id,
                           epg_id: selectedProgram.entry.id > 0 ? selectedProgram.entry.id : 0,
