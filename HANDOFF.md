@@ -35,10 +35,17 @@ Video Player UX Improvements:
 
 **DVR & Recording System**:
 - Full DVR scheduler (`internal/dvr/scheduler.go`) handles automated recordings based on EPG data.
+- **Customizable DVR Configuration**: `dvr_path`, `pre_padding`, and `post_padding` (minutes) can be configured via the new System Settings UI. The scheduler dynamically adjusts start and end times based on these padding values to prevent missed intros/outros.
 - HDHomeRun streams are transcoded on-the-fly (`internal/stream/recorder.go`) to H.264 so they play natively in web browsers without plugins.
 - Recordings are instantly remuxed to MP4 (`-movflags +faststart`) upon completion, enabling buttery-smooth native scrubbing without relying on HLS segments.
-- Live active recordings feature a precise strict-cutoff (using `context.WithTimeout` on the FFmpeg process) guaranteeing they stop exactly when the EPG slot ends.
-- The UI includes manual start/stop toggles in the Video Player and a manual Kill Switch in the DVR dashboard for active recordings.
+- Live active recordings feature a precise strict-cutoff (using `context.WithTimeout` on the FFmpeg process) guaranteeing they stop exactly when the EPG slot ends (plus post-padding).
+- The EPG Grid integrates directly with the DVR, fetching active/scheduled recordings, visually highlighting them with a red `REC` badge and red borders, and allowing inline cancellation.
+- The UI includes manual start/stop toggles in the Video Player and a manual Kill Switch in the DVR dashboard for active recordings. Download buttons are also provided in the library to save MP4s locally.
+
+**System Monitoring & Settings**:
+- A new **System Tab** features a dynamic dashboard displaying goroutines, memory allocation, and formatted uptime.
+- Client heartbeat pings (`/api/system/ping`) populate an `activeClients` map to list live viewing devices (e.g., Smart TVs, iOS Apps) dynamically.
+- System Tab provides Database export/import functionality and a strict "Danger Zone" full database wipe via transactions.
 
 **MediaMTX Live Streaming Architecture (HDHomeRun & Custom Streams)**:
 - Migrated away from disk-based `.ts` chunk generation which caused severe disk I/O bottlenecks and stuttering.
