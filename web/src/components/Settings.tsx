@@ -190,9 +190,37 @@ export default function Settings() {
       .then(r => r.json())
       .then(data => {
         if (data.epg_sync_time) setEpgSyncTime(data.epg_sync_time);
+        if (data.dvr_path) setDvrPath(data.dvr_path);
+        if (data.pre_padding) setPrePadding(data.pre_padding);
+        if (data.post_padding) setPostPadding(data.post_padding);
       })
       .catch(console.error);
   }, []);
+
+  async function saveDvrSettings() {
+    setLoading(true);
+    try {
+      const res = await fetch(getApiUrl("/api/settings"), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dvr_path: dvrPath,
+          pre_padding: prePadding,
+          post_padding: postPadding
+        })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      addToast({
+        type: 'success',
+        title: 'DVR Settings Saved',
+        message: 'Recording preferences updated.'
+      });
+    } catch (err: any) {
+      addToast({ type: 'error', title: 'Failed to Save', message: err.message });
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function saveServerSettings() {
     setLoading(true);
@@ -792,8 +820,8 @@ export default function Settings() {
                 </div>
 
                 <div className="mt-5 sm:mt-6 pt-4 sm:pt-6 border-t border-neutral-700/50 flex justify-end">
-                  <button className="bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-medium px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg transition-all cursor-pointer shadow-md">
-                    Save Changes
+                  <button onClick={saveDvrSettings} disabled={loading} className="bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-medium px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg transition-all cursor-pointer shadow-md">
+                    {loading ? "Saving..." : "Save Changes"}
                   </button>
                 </div>
               </div>

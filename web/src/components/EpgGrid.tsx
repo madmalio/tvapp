@@ -15,6 +15,12 @@ type Channel = {
   group_title: string;
 };
 
+type Recording = {
+  id: number;
+  epg_id: number;
+  status: string;
+};
+
 type EPGEntry = {
   id: number;
   channel_id: number;
@@ -47,6 +53,19 @@ function mapCategory(rawGroup: string, channelName: string = ""): string {
 
 export default function EpgGrid() {
   const { data: sourcesData } = useApi<Source[]>('/api/sources');
+  const { data: recordings, refetch: refetchRecordings } = useApi<Recording[]>('/api/recordings');
+  const scheduledEpgIds = useMemo(() => {
+    const set = new Set<number>();
+    if (recordings) {
+      recordings.forEach(r => {
+        if ((r.status === 'scheduled' || r.status === 'recording') && r.epg_id) {
+          set.add(r.epg_id);
+        }
+      });
+    }
+    return set;
+  }, [recordings]);
+
   const sources = useMemo(() => sourcesData?.filter(s => s.type !== 'rtsp') || [], [sourcesData]);
   const [activeSourceId, setActiveSourceId] = useState<number | null>(() => {
     const saved = sessionStorage.getItem("tvapp_epg_source");
@@ -217,19 +236,16 @@ export default function EpgGrid() {
               const isActive = currentTime >= start && currentTime < end;
               const isPast = currentTime >= end;
 
+              const isScheduled = scheduledEpgIds.has(e.id);
               let backgroundStyle = {};
               if (isActive) {
                 const visibleStartMinutes = Math.max(0, offsetMinutes);
                 const minutesPassedInVisibleBox = currentTimeOffset - visibleStartMinutes;
                 const visibleDurationMinutes = width / PIXELS_PER_MINUTE;
-                // Avoid division by zero edge case
-                const percent = visibleDurationMinutes > 0 
-                  ? (minutesPassedInVisibleBox / visibleDurationMinutes) * 100 
-                  : 0;
-                  
-                backgroundStyle = {
-                  background: `linear-gradient(to right, rgba(37, 99, 235, 0.25) ${percent}%, rgba(38, 38, 38, 0.8) ${percent}%)`
-                };
+                const percent = visibleDurationMinutes > 0 ? (minutesPassedInVisibleBox / visibleDurationMinutes) * 100 : 0;
+                backgroundStyle = { background: `linear-gradient(to right, rgba(37, 99, 235, 0.25) ${percent}%, rgba(38, 38, 38, 0.8) ${percent}%)` };
+              } else if (isScheduled) {
+                backgroundStyle = { background: 'rgba(220, 38, 38, 0.15)' }; // subtle red background for scheduled
               } else if (isPast) {
                 backgroundStyle = { background: 'rgba(37, 99, 235, 0.25)' };
               } else {
@@ -249,11 +265,13 @@ export default function EpgGrid() {
                 >
                   <Wrapper
                     {...wrapperProps}
-                    className="block text-left w-full h-full rounded-md p-2 transition-all group/prog border border-transparent backdrop-blur-sm shadow-sm hover:border-blue-500 hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] hover:bg-neutral-800/80 focus:outline-none"
+                    className={`block text-left w-full h-full rounded-md p-2 transition-all group/prog border backdrop-blur-sm shadow-sm hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] hover:bg-neutral-800/80 focus:outline-none ${isScheduled ? 'border-red-500' : 'border-transparent hover:border-blue-500'}`}
                     style={backgroundStyle}
                   >
                     <div className="max-md:sticky max-md:left-24 max-w-full w-max overflow-hidden flex flex-col">
-                      <h4 className={`font-medium text-sm truncate leading-tight mb-1 ${isActive ? 'text-blue-100 font-bold' : 'text-white'}`}>{e.title}</h4>
+                      <h4 className={`font-medium text-sm truncate leading-tight mb-1 ${isActive ? 'text-blue-100 font-bold' : (isScheduled ? 'text-red-100 font-bold' : 'text-white')}`}>
+                        {e.title} {isScheduled && <span className="ml-1 text-[10px] uppercase tracking-wider text-red-500 font-bold">REC</span>}
+                      </h4>
                       <p className={`text-xs truncate ${isActive ? 'text-blue-300' : 'text-neutral-400 group-hover/prog:text-blue-200'}`}>
                         {start.toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})} - {end.toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})}
                       </p>
@@ -454,31 +472,50 @@ export default function EpgGrid() {
                 Close
               </button>
               {new Date(selectedProgram.entry.end_time) > currentTime ? (
-                <button 
-                  onClick={() => {
-                    const isLive = new Date(selectedProgram.entry.start_time) <= currentTime;
-                    fetch(getApiUrl('/api/recordings'), {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        channel_id: selectedProgram.channel.id,
-                        epg_id: selectedProgram.entry.id > 0 ? selectedProgram.entry.id : 0,
-                        title: selectedProgram.entry.title,
-                        start_time: isLive ? new Date().toISOString() : selectedProgram.entry.start_time,
-                        end_time: selectedProgram.entry.end_time
-                      })
-                    }).then(() => {
-                      addToast({ title: "Recording scheduled!", type: "success" });
-                      setSelectedProgram(null);
-                    }).catch(err => {
-                      console.error(err);
-                      addToast({ title: "Failed to schedule recording", type: "error" });
-                    });
-                  }}
-                  className="px-5 py-2 rounded-lg font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors cursor-pointer shadow-lg shadow-blue-500/20 border border-blue-500"
-                >
-                  {new Date(selectedProgram.entry.start_time) <= currentTime ? 'Record Remaining' : 'Schedule Recording'}
-                </button>
+                scheduledEpgIds.has(selectedProgram.entry.id) ? (
+                  <button 
+                    onClick={() => {
+                      const rec = recordings?.find(r => r.epg_id === selectedProgram.entry.id && (r.status === 'scheduled' || r.status === 'recording'));
+                      if (rec) {
+                        fetch(getApiUrl(`/api/recordings/${rec.id}`), { method: 'DELETE' }).then(() => {
+                          addToast({ title: "Recording cancelled", type: "success" });
+                          setSelectedProgram(null);
+                          refetchRecordings();
+                        }).catch(() => addToast({ title: "Failed to cancel", type: "error" }));
+                      }
+                    }}
+                    className="px-5 py-2 rounded-lg font-medium bg-red-600/20 hover:bg-red-600/30 text-red-500 transition-colors cursor-pointer border border-red-500/50"
+                  >
+                    Cancel Recording
+                  </button>
+                ) : (
+                  <button 
+                    onClick={() => {
+                      const isLive = new Date(selectedProgram.entry.start_time) <= currentTime;
+                      fetch(getApiUrl('/api/recordings'), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          channel_id: selectedProgram.channel.id,
+                          epg_id: selectedProgram.entry.id > 0 ? selectedProgram.entry.id : 0,
+                          title: selectedProgram.entry.title,
+                          start_time: isLive ? new Date().toISOString() : selectedProgram.entry.start_time,
+                          end_time: selectedProgram.entry.end_time
+                        })
+                      }).then(() => {
+                        addToast({ title: "Recording scheduled!", type: "success" });
+                        setSelectedProgram(null);
+                        refetchRecordings();
+                      }).catch(err => {
+                        console.error(err);
+                        addToast({ title: "Failed to schedule recording", type: "error" });
+                      });
+                    }}
+                    className="px-5 py-2 rounded-lg font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors cursor-pointer shadow-lg shadow-blue-500/20 border border-blue-500"
+                  >
+                    {new Date(selectedProgram.entry.start_time) <= currentTime ? 'Record Remaining' : 'Schedule Recording'}
+                  </button>
+                )
               ) : (
                 <button disabled className="px-5 py-2 rounded-lg font-medium bg-neutral-800/50 text-neutral-500 cursor-not-allowed border border-neutral-700/30">
                   Catch Up Unavailable

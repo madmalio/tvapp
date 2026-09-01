@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -65,7 +66,7 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 	r.Get("/api/stream/hls/*", serveHLSHandler)
 
 	// Serve DVR recordings directly
-	r.Handle("/recordings/*", http.StripPrefix("/recordings/", http.FileServer(http.Dir("recordings"))))
+	r.Get("/recordings/*", serveRecordingsHandler)
 
 	fileServer := http.FileServer(http.FS(distFS))
 	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
@@ -680,6 +681,12 @@ func heartbeatStreamHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func serveRecordingsHandler(w http.ResponseWriter, r *http.Request) {
+	dvrPath := db.GetSetting("dvr_path", "recordings")
+	urlPath := strings.TrimPrefix(r.URL.Path, "/recordings/")
+	http.ServeFile(w, r, filepath.Join(dvrPath, urlPath))
 }
 
 func serveHLSHandler(w http.ResponseWriter, r *http.Request) {

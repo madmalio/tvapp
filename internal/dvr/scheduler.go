@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +38,9 @@ func checkRecordings() {
 
 	now := time.Now()
 
+	prePaddingStr := db.GetSetting("pre_padding", "0")
+	prePadMins, _ := strconv.Atoi(prePaddingStr)
+	
 	for _, r := range recs {
 		if r.Status != "scheduled" {
 			continue
@@ -47,29 +51,32 @@ func checkRecordings() {
 			log.Printf("[dvr] invalid start time %s: %v", r.StartTime, err)
 			continue
 		}
+		
+		adjustedStartTime := startTime.Add(-time.Duration(prePadMins) * time.Minute)
 
-		// If start time is within 1 minute of now (or in the past and we missed it by a bit)
-		if now.After(startTime) || startTime.Sub(now) < 30*time.Second {
+		if now.After(adjustedStartTime) || adjustedStartTime.Sub(now) < 30*time.Second {
 			endTime, err := time.Parse(time.RFC3339, r.EndTime)
 			if err != nil {
 				log.Printf("[dvr] invalid end time %s: %v", r.EndTime, err)
 				continue
 			}
+			
+			postPaddingStr := db.GetSetting("post_padding", "0")
+			postPadMins, _ := strconv.Atoi(postPaddingStr)
+			adjustedEndTime := endTime.Add(time.Duration(postPadMins) * time.Minute)
 
-			// If it's already past the end time, mark as failed
-			if now.After(endTime) {
+			if now.After(adjustedEndTime) {
 				log.Printf("[dvr] missed recording %d: %s", r.ID, r.Title)
 				db.UpdateRecordingStatus(r.ID, "failed", "")
 				continue
 			}
 
-			go StartRecording(r, startTime, endTime)
+			go StartRecording(r, adjustedStartTime, adjustedEndTime)
 		}
 	}
 }
 
 func StartRecording(r db.RecordingRow, start, end time.Time) {
-	// Mark as recording
 	db.UpdateRecordingStatus(r.ID, "recording", "")
 
 	ch, err := db.GetChannel(r.ChannelID)
@@ -81,13 +88,15 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 
 	durationSec := int(end.Sub(time.Now()).Seconds())
 	if durationSec <= 0 {
-		durationSec = 60 // fallback
+		durationSec = 60
 	}
 
 	safeTitle := strings.ReplaceAll(r.Title, " ", "_")
 	safeTitle = strings.ReplaceAll(safeTitle, "/", "-")
 	filename := fmt.Sprintf("%s_%d.m3u8", safeTitle, r.ID)
-	outputFile := filepath.Join(recordingsDir, filename)
+	
+	dvrPath := db.GetSetting("dvr_path", "recordings")
+	outputFile := filepath.Join(dvrPath, filename)
 
 	err = stream.RecordStream(r.ID, ch.StreamURL, ch.TunerType, durationSec, outputFile)
 	if err != nil {
@@ -96,9 +105,8 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 		return
 	}
 
-	// Post-process: Remux to MP4 for instant scrubbing in browser
 	mp4Filename := fmt.Sprintf("%s_%d.mp4", safeTitle, r.ID)
-	mp4OutputFile := filepath.Join(recordingsDir, mp4Filename)
+	mp4OutputFile := filepath.Join(dvrPath, mp4Filename)
 	log.Printf("[dvr] remuxing %s to %s", outputFile, mp4OutputFile)
 	
 	cmd := exec.Command("ffmpeg", "-i", outputFile, "-c", "copy", "-movflags", "+faststart", mp4OutputFile)
