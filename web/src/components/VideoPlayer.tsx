@@ -17,7 +17,7 @@ import {
   Maximize2
 } from "lucide-react";
 import Hls from "hls.js";
-import { getApiUrl, fetchWithCache } from "../lib/api";
+import { getApiUrl, fetchWithCache, getApiHeaders } from "../lib/api";
 import { useSpeedTest, StreamQuality } from "../hooks/useSpeedTest";
 import { lockToLandscape, unlockScreenOrientation } from "../lib/orientation";
 import { usePlayer, ChannelInfo, CameraInfo } from "../context/PlayerContext";
@@ -407,7 +407,7 @@ export default function VideoPlayer() {
       setStatus("Starting stream...");
       fetch(getApiUrl("/api/stream/start"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(getApiHeaders() as any) },
         body: JSON.stringify({ 
           url: channel.stream_url, 
           tuner_type: channel.tuner_type, 

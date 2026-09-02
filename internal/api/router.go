@@ -56,6 +56,13 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 		r.Get("/api/recordings", getRecordings)
 		r.Get("/api/recordings/{id}", getRecording)
 		
+		r.Post("/api/system/ping", clientPing)
+		r.Get("/api/speedtest", speedtestHandler)
+		r.Get("/api/system/speedtest", speedtestHandler) // Alias for UI
+		r.Post("/api/stream/start", startStreamHandler)
+		r.Post("/api/stream/stop/{id}", stopStreamHandler)
+		r.Delete("/api/stream/stop/{id}", stopStreamHandler)
+		
 		// Admin Only Routes
 		r.Group(func(r chi.Router) {
 			r.Use(RequireAdmin)
@@ -79,13 +86,9 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 			r.Get("/api/system/backup", exportDatabase)
 			r.Post("/api/system/import", importDatabase)
 			r.Post("/api/system/wipe", wipeAllData)
-			r.Post("/api/system/ping", clientPing)
 			
-			r.Get("/api/speedtest", speedtestHandler)
 			r.Get("/api/settings", getSettingsHandler)
 			r.Put("/api/settings", updateSettingsHandler)
-			r.Post("/api/stream/start", startStreamHandler)
-			r.Delete("/api/stream/stop/{id}", stopStreamHandler)
 		})
 	})
 	r.Get("/api/stream/heartbeat/{id}", heartbeatStreamHandler)

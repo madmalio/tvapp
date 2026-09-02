@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Maximize2, X, Play, Pause, Volume2, VolumeX, Radio, Video } from "lucide-react";
 import Hls from "hls.js";
 import { usePlayer } from "../context/PlayerContext";
-import { getApiUrl } from "../lib/api";
+import { getApiUrl, getApiHeaders } from "../lib/api";
 
 export default function MiniPlayer() {
   const {
@@ -96,7 +96,7 @@ export default function MiniPlayer() {
     if (activeChannel.tuner_type === "hdhomerun") {
       fetch(getApiUrl("/api/stream/start"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(getApiHeaders() as any) },
         body: JSON.stringify({
           url: activeChannel.stream_url,
           tuner_type: "hdhomerun",

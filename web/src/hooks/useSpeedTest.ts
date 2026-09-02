@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getApiUrl } from '../lib/api';
+import { getApiUrl, getApiHeaders } from '../lib/api';
 
 export type StreamQuality = 
   | 'source' 
@@ -43,7 +43,7 @@ export function useSpeedTest() {
     const testSpeed = async () => {
       try {
         const startTime = performance.now();
-        const response = await fetch(getApiUrl('/api/speedtest'), { cache: 'no-store' });
+        const response = await fetch(getApiUrl('/api/speedtest'), { cache: 'no-store', headers: getApiHeaders() });
         
         if (!response.ok) throw new Error('Speedtest failed');
         

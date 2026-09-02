@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { getApiUrl } from "./lib/api";
+import { getApiUrl, getApiHeaders } from "./lib/api";
 import Sidebar from "./components/Sidebar";
 import ChannelList from "./components/ChannelList";
 import EpgGrid from "./components/EpgGrid";
@@ -27,7 +27,7 @@ export default function App() {
 
   useEffect(() => {
     const ping = () => {
-      fetch(getApiUrl('/api/system/ping'), { method: 'POST' }).catch(() => {});
+      fetch(getApiUrl('/api/system/ping'), { method: 'POST', headers: getApiHeaders() }).catch(() => {});
     };
     ping();
     const interval = window.setInterval(ping, 30000);

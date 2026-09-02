@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { getApiUrl } from "../lib/api";
+import { getApiUrl, getApiHeaders } from "../lib/api";
 import { useApi } from "../hooks/useApi";
 import { 
   ArrowLeft, 
@@ -165,7 +165,7 @@ async function startCameraConnection(entry: CachedStream) {
     if (!streamId) {
       const startRes = await fetch(getApiUrl("/api/stream/start"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(getApiHeaders() as any) },
         body: JSON.stringify({ url: entry.source.url, tuner_type: "rtsp", quality: "720p_std" }),
       });
       if (!startRes.ok) {
