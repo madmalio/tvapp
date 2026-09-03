@@ -96,6 +96,7 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 
 	// Serve DVR recordings directly
 	r.Get("/recordings/*", serveRecordingsHandler)
+	r.Get("/recordings/download/{id}", downloadRecordingHandler)
 
 	fileServer := http.FileServer(http.FS(distFS))
 	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {

@@ -63,7 +63,7 @@ export default function Recordings() {
   const filtered = recordings?.filter(r => 
     activeTab === "scheduled" 
       ? (r.status === "scheduled" || r.status === "recording")
-      : (r.status === "completed" || r.status === "failed")
+      : (r.status === "completed" || r.status === "failed" || r.status === "processing")
   ) || [];
 
   const scheduledCount = recordings?.filter(r => r.status === "scheduled" || r.status === "recording").length || 0;
@@ -107,6 +107,9 @@ export default function Recordings() {
                     <h3 className="font-bold text-white text-lg truncate">{r.title}</h3>
                     {r.status === "recording" && (
                       <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded animate-pulse">RECORDING</span>
+                    )}
+                    {r.status === "processing" && (
+                      <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded animate-pulse">SAVING...</span>
                     )}
                     {r.status === "failed" && (
                       <span className="bg-red-900/50 text-red-400 border border-red-800 text-[10px] font-bold px-2 py-0.5 rounded">FAILED</span>

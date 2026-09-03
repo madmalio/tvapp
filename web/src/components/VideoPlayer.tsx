@@ -769,7 +769,7 @@ export default function VideoPlayer() {
                   onClick={(e) => {
                     e.stopPropagation();
                     if (activeRecordingId) {
-                      fetch(getApiUrl(`/api/recordings/${activeRecordingId}/stop`), { method: 'POST' })
+                      fetch(getApiUrl(`/api/recordings/${activeRecordingId}/stop`), { method: 'POST', headers: getApiHeaders() })
                         .then(() => {
                           setActiveRecordingId(null);
                           showToast("Recording stopped and saved");
@@ -781,7 +781,7 @@ export default function VideoPlayer() {
                       
                       fetch(getApiUrl('/api/recordings'), {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'application/json', ...getApiHeaders() as Record<string, string> },
                         body: JSON.stringify({
                           channel_id: channel.id,
                           epg_id: epgId,

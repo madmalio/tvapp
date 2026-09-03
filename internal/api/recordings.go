@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -131,4 +132,37 @@ func stopRecording(w http.ResponseWriter, r *http.Request) {
 	stream.StopRecording(id)
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func downloadRecordingHandler(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	rec, err := db.GetRecording(id)
+	if err != nil || rec.FilePath == "" {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	if strings.HasSuffix(rec.FilePath, ".mp4") {
+		http.ServeFile(w, r, rec.FilePath)
+		return
+	}
+
+	safeTitle := strings.ReplaceAll(rec.Title, " ", "_")
+	safeTitle = strings.ReplaceAll(safeTitle, "/", "-")
+	mkvFilename := fmt.Sprintf("%s.mkv", safeTitle)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", mkvFilename))
+	w.Header().Set("Content-Type", "video/x-matroska")
+
+	cmd := exec.CommandContext(r.Context(), "ffmpeg", "-i", rec.FilePath, "-c", "copy", "-f", "matroska", "pipe:1")
+	cmd.Stdout = w
+	err = cmd.Run()
+	if err != nil {
+		fmt.Printf("[api] failed to stream mkv: %v\n", err)
+	}
 }

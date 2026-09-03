@@ -93,7 +93,12 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 
 	safeTitle := strings.ReplaceAll(r.Title, " ", "_")
 	safeTitle = strings.ReplaceAll(safeTitle, "/", "-")
-	filename := fmt.Sprintf("%s_%d.m3u8", safeTitle, r.ID)
+	
+	ext := ".m3u8"
+	if ch.TunerType != "hdhomerun" && ch.TunerType != "rtsp" {
+		ext = ".ts"
+	}
+	filename := fmt.Sprintf("%s_%d%s", safeTitle, r.ID, ext)
 	
 	dvrPath := db.GetSetting("dvr_path", "recordings")
 	outputFile := filepath.Join(dvrPath, filename)
@@ -107,9 +112,17 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 
 	mp4Filename := fmt.Sprintf("%s_%d.mp4", safeTitle, r.ID)
 	mp4OutputFile := filepath.Join(dvrPath, mp4Filename)
-	log.Printf("[dvr] remuxing %s to %s", outputFile, mp4OutputFile)
 	
-	cmd := exec.Command("ffmpeg", "-i", outputFile, "-c", "copy", "-movflags", "+faststart", mp4OutputFile)
+	var cmd *exec.Cmd
+	if ch.TunerType != "hdhomerun" && ch.TunerType != "rtsp" {
+		db.UpdateRecordingStatus(r.ID, "processing", "")
+		log.Printf("[dvr] rebuilding timestamps and transcoding %s to %s", outputFile, mp4OutputFile)
+		cmd = exec.Command("ffmpeg", "-err_detect", "ignore_err", "-fflags", "+genpts", "-i", outputFile, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-r", "30", "-vsync", "1", "-c:a", "aac", "-async", "1", "-movflags", "+faststart", mp4OutputFile)
+	} else {
+		log.Printf("[dvr] remuxing %s to %s", outputFile, mp4OutputFile)
+		cmd = exec.Command("ffmpeg", "-i", outputFile, "-c", "copy", "-movflags", "+faststart", mp4OutputFile)
+	}
+	
 	if err := cmd.Run(); err == nil {
 		// If successful, delete the old m3u8 and ts files
 		dir := filepath.Dir(outputFile)
@@ -122,7 +135,7 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 		}
 		outputFile = mp4OutputFile
 	} else {
-		log.Printf("[dvr] failed to remux %s to mp4: %v", outputFile, err)
+		log.Printf("[dvr] failed to process %s to mp4: %v", outputFile, err)
 	}
 
 	db.UpdateRecordingStatus(r.ID, "completed", outputFile)
