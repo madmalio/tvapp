@@ -37,7 +37,7 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 	streamURL := rawURL
 	if tunerType != "hdhomerun" && tunerType != "rtsp" {
 		// Route through the local proxy to piggyback on active sessions and bypass the PlutoTV slate
-		streamURL = "http://127.0.0.1:8080/api/proxy?url=" + url.QueryEscape(rawURL)
+		streamURL = "http://127.0.0.1:8080/api/proxy?adskip=1&url=" + url.QueryEscape(rawURL)
 	}
 
 	headers := ffmpegHeaders(streamURL)

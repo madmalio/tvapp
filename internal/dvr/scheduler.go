@@ -116,14 +116,15 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 	var cmd *exec.Cmd
 	if ch.TunerType != "hdhomerun" && ch.TunerType != "rtsp" {
 		db.UpdateRecordingStatus(r.ID, "processing", "")
-		log.Printf("[dvr] rebuilding timestamps and transcoding %s to %s", outputFile, mp4OutputFile)
-		cmd = exec.Command("ffmpeg", "-err_detect", "ignore_err", "-fflags", "+genpts", "-i", outputFile, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-r", "30", "-vsync", "1", "-c:a", "aac", "-async", "1", "-movflags", "+faststart", mp4OutputFile)
+		log.Printf("[dvr] instant remuxing %s to %s", outputFile, mp4OutputFile)
+		cmd = exec.Command("ffmpeg", "-err_detect", "ignore_err", "-fflags", "+genpts", "-i", outputFile, "-c", "copy", "-movflags", "+faststart", mp4OutputFile)
 	} else {
 		log.Printf("[dvr] remuxing %s to %s", outputFile, mp4OutputFile)
 		cmd = exec.Command("ffmpeg", "-i", outputFile, "-c", "copy", "-movflags", "+faststart", mp4OutputFile)
 	}
 	
-	if err := cmd.Run(); err == nil {
+	out, err := cmd.CombinedOutput()
+	if err == nil {
 		// If successful, delete the old m3u8 and ts files
 		dir := filepath.Dir(outputFile)
 		base := strings.TrimSuffix(filepath.Base(outputFile), filepath.Ext(outputFile))
@@ -135,7 +136,20 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 		}
 		outputFile = mp4OutputFile
 	} else {
-		log.Printf("[dvr] failed to process %s to mp4: %v", outputFile, err)
+		log.Printf("[dvr] instant remux failed (ad slip-through detected): %v, out: %s", err, string(out))
+		log.Printf("[dvr] falling back to full transcode for %s (this will take longer)...", outputFile)
+		
+		// Fallback: Transcode the video to normalize any resolution changes caused by ads
+		fallbackCmd := exec.Command("ffmpeg", "-merge_pmt_versions", "1", "-err_detect", "ignore_err", "-i", outputFile, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-r", "30", "-vf", "scale=-2:720", "-c:a", "aac", "-async", "1", "-movflags", "+faststart", "-y", mp4OutputFile)
+		fbOut, fbErr := fallbackCmd.CombinedOutput()
+		
+		if fbErr == nil {
+			log.Printf("[dvr] fallback transcode successful for %s", mp4OutputFile)
+			os.Remove(outputFile)
+			outputFile = mp4OutputFile
+		} else {
+			log.Printf("[dvr] fallback transcode failed: %v, out: %s", fbErr, string(fbOut))
+		}
 	}
 
 	db.UpdateRecordingStatus(r.ID, "completed", outputFile)

@@ -542,8 +542,12 @@ func resolveHLSURL(base *url.URL, raw string) string {
 }
 
 func hlsCleanPlaylist(body []byte, base *url.URL, basePath string, queryParams string) []byte {
+	skipAds := strings.Contains(queryParams, "adskip=1")
 	lines := strings.Split(string(body), "\n")
 	var out []string
+	var pendingEXTINF string
+	var inAdBreak bool
+
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
@@ -552,21 +556,59 @@ func hlsCleanPlaylist(body []byte, base *url.URL, basePath string, queryParams s
 		if strings.HasPrefix(trimmed, "#EXT-X-MEDIA:TYPE=SUBTITLES") {
 			continue
 		}
-		if strings.HasPrefix(trimmed, "#EXT-X-STREAM-INF:") {
-			parts := strings.Split(line, ",")
-			var cleaned []string
-			for _, p := range parts {
-				if !strings.HasPrefix(strings.TrimSpace(p), "SUBTITLES=") {
-					cleaned = append(cleaned, p)
+		if skipAds {
+			if strings.HasPrefix(trimmed, "#EXT-X-CUE-OUT") || strings.Contains(trimmed, "SCTE35") {
+				inAdBreak = true
+			}
+			if strings.HasPrefix(trimmed, "#EXT-X-CUE-IN") {
+				inAdBreak = false
+			}
+			if strings.HasPrefix(trimmed, "#EXT-X-DISCONTINUITY") {
+				continue
+			}
+		}
+
+		if strings.HasPrefix(trimmed, "#EXTINF:") {
+			pendingEXTINF = line
+			continue
+		}
+
+		if !strings.HasPrefix(trimmed, "#") {
+			isAd := false
+			if skipAds {
+				lower := strings.ToLower(trimmed)
+				if inAdBreak || strings.Contains(lower, "/ad/") || strings.Contains(lower, "stitch") || strings.Contains(lower, "creative") || strings.Contains(lower, "bumper") || strings.Contains(lower, "google") {
+					isAd = true
 				}
 			}
-			line = strings.Join(cleaned, ",")
-		}
-		line = rewriteAllURIs(line, base, basePath, queryParams)
-		if !strings.HasPrefix(trimmed, "#") {
+
+			if isAd {
+				pendingEXTINF = ""
+				continue
+			}
+
+			if pendingEXTINF != "" {
+				out = append(out, pendingEXTINF)
+				pendingEXTINF = ""
+			}
+
+			line = rewriteAllURIs(line, base, basePath, queryParams)
 			line = resolveURL(line, base, basePath, queryParams)
+			out = append(out, line)
+		} else {
+			if strings.HasPrefix(trimmed, "#EXT-X-STREAM-INF:") {
+				parts := strings.Split(line, ",")
+				var cleaned []string
+				for _, p := range parts {
+					if !strings.HasPrefix(strings.TrimSpace(p), "SUBTITLES=") {
+						cleaned = append(cleaned, p)
+					}
+				}
+				line = strings.Join(cleaned, ",")
+			}
+			line = rewriteAllURIs(line, base, basePath, queryParams)
+			out = append(out, line)
 		}
-		out = append(out, line)
 	}
 	return []byte(strings.Join(out, "\n"))
 }
