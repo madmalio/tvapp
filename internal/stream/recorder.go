@@ -61,7 +61,6 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 			outputFile,
 		}
 	} else if tunerType == "hdhomerun" {
-		// Treat HDHomeRun / MediaMTX HLS streams as a dumb pipe (copy) to preserve quality without transcoding
 		args = []string{
 			"-user_agent", userAgent,
 		}
@@ -71,9 +70,15 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 		args = append(args,
 			"-i", streamURL,
 			"-t", strconv.Itoa(durationSec),
-			"-c", "copy",
-			"-copyts",
-			"-f", "mpegts",
+		)
+		args = append(args, GetOptimalVideoArgs("1080p_high")...)
+		args = append(args,
+			"-c:a", "aac",
+			"-b:a", "128k",
+			"-f", "hls",
+			"-hls_time", "6",
+			"-hls_list_size", "0",
+			"-hls_segment_filename", segmentFile,
 			outputFile,
 		)
 	} else {

@@ -95,7 +95,7 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 	safeTitle = strings.ReplaceAll(safeTitle, "/", "-")
 	
 	ext := ".ts"
-	if ch.TunerType == "rtsp" {
+	if ch.TunerType == "hdhomerun" || ch.TunerType == "rtsp" {
 		ext = ".m3u8"
 	}
 	filename := fmt.Sprintf("%s_%d%s", safeTitle, r.ID, ext)
