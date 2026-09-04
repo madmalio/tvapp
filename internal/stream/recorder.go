@@ -70,11 +70,8 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 		args = append(args,
 			"-i", streamURL,
 			"-t", strconv.Itoa(durationSec),
-		)
-		args = append(args, GetOptimalVideoArgs("1080p_high")...)
-		args = append(args,
-			"-c:a", "aac",
-			"-b:a", "128k",
+			"-c", "copy",
+			"-copyts",
 			"-f", "hls",
 			"-hls_time", "6",
 			"-hls_list_size", "0",
