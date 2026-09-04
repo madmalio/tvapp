@@ -110,11 +110,19 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 		return
 	}
 
+	if _, err := os.Stat(outputFile); os.IsNotExist(err) {
+		log.Printf("[dvr] recording file %s was not created (recording may have been stopped too quickly)", outputFile)
+		db.UpdateRecordingStatus(r.ID, "failed", "File not created")
+		return
+	}
+
 	mp4Filename := fmt.Sprintf("%s_%d.mp4", safeTitle, r.ID)
 	mp4OutputFile := filepath.Join(dvrPath, mp4Filename)
 	
 	var cmd *exec.Cmd
-	if ch.TunerType != "hdhomerun" && ch.TunerType != "rtsp" {
+	isIPTV := ch.TunerType != "hdhomerun" && ch.TunerType != "rtsp"
+	
+	if isIPTV {
 		db.UpdateRecordingStatus(r.ID, "processing", "")
 		log.Printf("[dvr] instant remuxing %s to %s", outputFile, mp4OutputFile)
 		cmd = exec.Command("ffmpeg", "-err_detect", "ignore_err", "-fflags", "+genpts", "-i", outputFile, "-c", "copy", "-movflags", "+faststart", mp4OutputFile)
@@ -136,19 +144,22 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 		}
 		outputFile = mp4OutputFile
 	} else {
-		log.Printf("[dvr] instant remux failed (ad slip-through detected): %v, out: %s", err, string(out))
-		log.Printf("[dvr] falling back to full transcode for %s (this will take longer)...", outputFile)
-		
-		// Fallback: Transcode the video to normalize any resolution changes caused by ads
-		fallbackCmd := exec.Command("ffmpeg", "-merge_pmt_versions", "1", "-err_detect", "ignore_err", "-i", outputFile, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-r", "30", "-vf", "scale=-2:720", "-c:a", "aac", "-async", "1", "-movflags", "+faststart", "-y", mp4OutputFile)
-		fbOut, fbErr := fallbackCmd.CombinedOutput()
-		
-		if fbErr == nil {
-			log.Printf("[dvr] fallback transcode successful for %s", mp4OutputFile)
-			os.Remove(outputFile)
-			outputFile = mp4OutputFile
+		if isIPTV {
+			log.Printf("[dvr] instant remux failed (ad slip-through detected): %v, out: %s", err, string(out))
+			log.Printf("[dvr] falling back to full transcode for %s (this will take longer)...", outputFile)
+			
+			fallbackCmd := exec.Command("ffmpeg", "-merge_pmt_versions", "1", "-err_detect", "ignore_err", "-i", outputFile, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-r", "30", "-vf", "scale=-2:720", "-c:a", "aac", "-async", "1", "-movflags", "+faststart", "-y", mp4OutputFile)
+			fbOut, fbErr := fallbackCmd.CombinedOutput()
+			
+			if fbErr == nil {
+				log.Printf("[dvr] fallback transcode successful for %s", mp4OutputFile)
+				os.Remove(outputFile)
+				outputFile = mp4OutputFile
+			} else {
+				log.Printf("[dvr] fallback transcode failed: %v, out: %s", fbErr, string(fbOut))
+			}
 		} else {
-			log.Printf("[dvr] fallback transcode failed: %v, out: %s", fbErr, string(fbOut))
+			log.Printf("[dvr] remux failed: %v, out: %s", err, string(out))
 		}
 	}
 
