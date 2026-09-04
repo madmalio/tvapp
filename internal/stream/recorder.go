@@ -29,6 +29,7 @@ func StopRecording(recordingID int) {
 }
 
 func RecordStream(recordingID int, rawURL string, tunerType string, durationSec int, outputFile string) error {
+	tunerType = strings.ToLower(tunerType)
 	dir := filepath.Dir(outputFile)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -60,20 +61,19 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 			outputFile,
 		}
 	} else if tunerType == "hdhomerun" {
+		// Treat HDHomeRun / MediaMTX HLS streams as a dumb pipe (copy) to preserve quality without transcoding
 		args = []string{
 			"-user_agent", userAgent,
-			"-headers", headers,
+		}
+		if headers != "" {
+			args = append(args, "-headers", headers)
+		}
+		args = append(args,
 			"-i", streamURL,
 			"-t", strconv.Itoa(durationSec),
-		}
-		args = append(args, GetOptimalVideoArgs("1080p_high")...)
-		args = append(args,
-			"-c:a", "aac",
-			"-b:a", "128k",
-			"-f", "hls",
-			"-hls_time", "6",
-			"-hls_list_size", "0",
-			"-hls_segment_filename", segmentFile,
+			"-c", "copy",
+			"-copyts",
+			"-f", "mpegts",
 			outputFile,
 		)
 	} else {
