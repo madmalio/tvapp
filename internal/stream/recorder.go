@@ -89,10 +89,10 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 			"-headers", headers,
 			"-live_start_index", "-1", // Skip the slate by starting at the live edge
 			"-err_detect", "ignore_err", // Ignore ad-break errors
+			"-fflags", "+genpts+igndts", // Smooth out PTS/DTS jumps natively
 			"-i", streamURL,
 			"-t", strconv.Itoa(durationSec),
 			"-c", "copy",
-			"-copyts", // Keep timestamps exactly as they are to prevent demuxer stalling
 			"-f", "mpegts",
 			outputFile,
 		}
