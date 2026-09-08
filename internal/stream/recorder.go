@@ -82,8 +82,9 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 			outputFile,
 		)
 	} else {
-		// Just act as a dumb pipe: append all HLS segments into a single .ts file and preserve the broken timestamps.
-		// The scheduler will fix the timestamps when it converts the .ts file to .mp4.
+		// IPTV (e.g. Pluto, Stirr, Samsung)
+		// We use -c copy to dump the stream to disk without transcoding.
+		// We use -f hls to let the web player handle PTS gaps natively via hls.js!
 		args = []string{
 			"-user_agent", userAgent,
 			"-headers", headers,
@@ -93,7 +94,10 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 			"-i", streamURL,
 			"-t", strconv.Itoa(durationSec),
 			"-c", "copy",
-			"-f", "mpegts",
+			"-f", "hls",
+			"-hls_time", "6",
+			"-hls_list_size", "0",
+			"-hls_segment_filename", segmentFile,
 			outputFile,
 		}
 	}
@@ -101,60 +105,7 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(durationSec+5)*time.Second)
 	defer cancel()
 
-	if tunerType != "hdhomerun" && tunerType != "rtsp" {
-		// Resilient loop for IPTV: append to the .ts file and restart ffmpeg if it crashes on ad breaks
-		f, err := os.OpenFile(outputFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-
-		startTime := time.Now()
-		for {
-			elapsed := time.Since(startTime)
-			remaining := durationSec - int(elapsed.Seconds())
-			if remaining <= 0 || ctx.Err() != nil {
-				break
-			}
-
-			args = []string{
-				"-user_agent", userAgent,
-				"-headers", headers,
-				"-live_start_index", "-1",
-				"-err_detect", "ignore_err",
-				"-fflags", "+genpts+igndts",
-				"-i", streamURL,
-				"-t", strconv.Itoa(remaining),
-				"-c", "copy",
-				"-f", "mpegts",
-				"pipe:1",
-			}
-
-			cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-			cmd.Stdout = f
-
-			recordingsMutex.Lock()
-			activeRecordings[recordingID] = cmd
-			recordingsMutex.Unlock()
-
-			log.Printf("[dvr] starting/resuming iptv chunk for %ds", remaining)
-			err := cmd.Run()
-
-			if ctx.Err() != nil || (err != nil && (strings.Contains(err.Error(), "killed") || strings.Contains(err.Error(), "exit status 255"))) {
-				log.Printf("[dvr] recording %d stopped manually or timed out", recordingID)
-				break
-			}
-			
-			if err != nil {
-				log.Printf("[dvr] ffmpeg exited on ad break (%v), reconnecting in 2s...", err)
-				time.Sleep(2 * time.Second)
-			}
-		}
-		log.Printf("[dvr] finished recording to %s", outputFile)
-		return nil
-	}
-
-	// Standard execution for HDHomeRun and RTSP (M3U8 output)
+	// Standard execution for all tuners (M3U8 output)
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	
 	recordingsMutex.Lock()

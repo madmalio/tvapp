@@ -94,10 +94,7 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 	safeTitle := strings.ReplaceAll(r.Title, " ", "_")
 	safeTitle = strings.ReplaceAll(safeTitle, "/", "-")
 	
-	ext := ".ts"
-	if ch.TunerType == "hdhomerun" || ch.TunerType == "rtsp" {
-		ext = ".m3u8"
-	}
+	ext := ".m3u8"
 	filename := fmt.Sprintf("%s_%d%s", safeTitle, r.ID, ext)
 	
 	dvrPath := db.GetSetting("dvr_path", "recordings")
@@ -114,71 +111,6 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 		log.Printf("[dvr] recording file %s was not created (recording may have been stopped too quickly)", outputFile)
 		db.UpdateRecordingStatus(r.ID, "failed", "File not created")
 		return
-	}
-
-	mp4Filename := fmt.Sprintf("%s_%d.mp4", safeTitle, r.ID)
-	mp4OutputFile := filepath.Join(dvrPath, mp4Filename)
-	
-	var cmd *exec.Cmd
-	isIPTV := ch.TunerType != "hdhomerun" && ch.TunerType != "rtsp"
-	
-	if isIPTV {
-		db.UpdateRecordingStatus(r.ID, "processing", "")
-		log.Printf("[dvr] instant remuxing %s to %s", outputFile, mp4OutputFile)
-		cmd = exec.Command("ffmpeg", "-err_detect", "ignore_err", "-fflags", "+genpts", "-i", outputFile, "-c", "copy", "-movflags", "+faststart", mp4OutputFile)
-	} else {
-		log.Printf("[dvr] remuxing %s to %s", outputFile, mp4OutputFile)
-		cmd = exec.Command("ffmpeg", "-i", outputFile, "-c", "copy", "-movflags", "+faststart", mp4OutputFile)
-	}
-	
-	out, err := cmd.CombinedOutput()
-	
-	// ffmpeg -c copy will often silently succeed but create a corrupt MP4 
-	// if a resolution/PTS change occurred during an ad. We must detect this by parsing its output!
-	needsFallback := false
-	if isIPTV {
-		outStr := strings.ToLower(string(out))
-		if err != nil || strings.Contains(outStr, "parameters changed") || strings.Contains(outStr, "changing video frame properties") {
-			log.Printf("[dvr] instant remux detected structural stream corruption (resolution change), flagging for fallback transcode...")
-			needsFallback = true
-		} else if strings.Contains(outStr, "non-monotonous") || strings.Contains(outStr, "invalid dts") || strings.Contains(outStr, "discontinuity") {
-			log.Printf("[dvr] instant remux detected PTS gaps (ads dropped), but structure is intact. Proceeding with MP4.")
-		}
-	}
-
-	if err == nil && !needsFallback {
-		// If successful and clean, delete the old m3u8 and ts files
-		dir := filepath.Dir(outputFile)
-		base := strings.TrimSuffix(filepath.Base(outputFile), filepath.Ext(outputFile))
-		files, _ := os.ReadDir(dir)
-		for _, f := range files {
-			if strings.HasPrefix(f.Name(), base) && !strings.HasSuffix(f.Name(), ".mp4") {
-				os.Remove(filepath.Join(dir, f.Name()))
-			}
-		}
-		outputFile = mp4OutputFile
-	} else {
-		if isIPTV {
-			if needsFallback {
-				log.Printf("[dvr] instant remux produced corrupt file (multiple video streams), triggering fallback transcode...")
-			} else {
-				log.Printf("[dvr] instant remux failed (ad slip-through detected): %v, out: %s", err, string(out))
-			}
-			log.Printf("[dvr] falling back to full transcode for %s (this will take longer)...", outputFile)
-			
-			fallbackCmd := exec.Command("ffmpeg", "-merge_pmt_versions", "1", "-err_detect", "ignore_err", "-i", outputFile, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-r", "30", "-vf", "scale=-2:720", "-c:a", "aac", "-async", "1", "-movflags", "+faststart", "-y", mp4OutputFile)
-			fbOut, fbErr := fallbackCmd.CombinedOutput()
-			
-			if fbErr == nil {
-				log.Printf("[dvr] fallback transcode successful for %s", mp4OutputFile)
-				os.Remove(outputFile)
-				outputFile = mp4OutputFile
-			} else {
-				log.Printf("[dvr] fallback transcode failed: %v, out: %s", fbErr, string(fbOut))
-			}
-		} else {
-			log.Printf("[dvr] remux failed: %v, out: %s", err, string(out))
-		}
 	}
 
 	db.UpdateRecordingStatus(r.ID, "completed", outputFile)
