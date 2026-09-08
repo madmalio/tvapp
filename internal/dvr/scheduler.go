@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -110,6 +111,54 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 		log.Printf("[dvr] recording file %s was not created (recording may have been stopped too quickly)", outputFile)
 		db.UpdateRecordingStatus(r.ID, "failed", "File not created")
 		return
+	}
+
+	// Package the HLS chunks into a gapless MP4 using the concat demuxer.
+	// This natively rewrites PTS timestamps across ad gaps, resulting in a perfect MP4 without transcoding!
+	mp4Filename := fmt.Sprintf("%s_%d.mp4", safeTitle, r.ID)
+	mp4OutputFile := filepath.Join(dvrPath, mp4Filename)
+
+	dir := filepath.Dir(outputFile)
+	base := strings.TrimSuffix(filepath.Base(outputFile), filepath.Ext(outputFile))
+	
+	files, _ := os.ReadDir(dir)
+	var tsFiles []string
+	for _, f := range files {
+		if strings.HasPrefix(f.Name(), base) && strings.HasSuffix(f.Name(), ".ts") {
+			tsFiles = append(tsFiles, f.Name())
+		}
+	}
+	
+	if len(tsFiles) > 0 {
+		concatPath := filepath.Join(dir, fmt.Sprintf("concat_%d.txt", r.ID))
+		var concatContent strings.Builder
+		for _, ts := range tsFiles {
+			// Because chunks are padded (e.g. _00001.ts), ReadDir's lexicographical sort is correct.
+			concatContent.WriteString(fmt.Sprintf("file '%s'\n", ts))
+		}
+		os.WriteFile(concatPath, []byte(concatContent.String()), 0644)
+		
+		db.UpdateRecordingStatus(r.ID, "processing", "")
+		log.Printf("[dvr] concatenating %d chunks into MP4 to eliminate PTS gaps...", len(tsFiles))
+		
+		cmd := exec.Command("ffmpeg", "-f", "concat", "-safe", "0", "-i", concatPath, "-c", "copy", "-movflags", "+faststart", mp4OutputFile)
+		out, err := cmd.CombinedOutput()
+		
+		if err == nil {
+			log.Printf("[dvr] instant concat successful for %s", mp4OutputFile)
+			
+			// Clean up HLS chunks, playlist, and concat file
+			os.Remove(concatPath)
+			for _, f := range files {
+				if strings.HasPrefix(f.Name(), base) && !strings.HasSuffix(f.Name(), ".mp4") {
+					os.Remove(filepath.Join(dir, f.Name()))
+				}
+			}
+			outputFile = mp4OutputFile
+		} else {
+			log.Printf("[dvr] concat failed: %v, out: %s", err, string(out))
+			// If it fails, we safely fall back to serving the .m3u8 playlist natively
+		}
 	}
 
 	db.UpdateRecordingStatus(r.ID, "completed", outputFile)
