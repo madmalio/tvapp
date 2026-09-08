@@ -132,8 +132,25 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 	}
 	
 	out, err := cmd.CombinedOutput()
-	if err == nil {
-		// If successful, delete the old m3u8 and ts files
+	
+	// ffmpeg -c copy will often silently succeed but create a corrupt MP4 with multiple video streams
+	// if a resolution change occurred during an ad. We must detect this using ffprobe!
+	needsFallback := false
+	if isIPTV && err == nil {
+		probeCmd := exec.Command("ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=index", "-of", "csv=p=0", mp4OutputFile)
+		probeOut, probeErr := probeCmd.Output()
+		if probeErr == nil {
+			// Count the number of video streams (each line is a stream)
+			lines := strings.Split(strings.TrimSpace(string(probeOut)), "\n")
+			if len(lines) > 1 {
+				log.Printf("[dvr] detected %d video streams in instant remux (ad resolution change detected)", len(lines))
+				needsFallback = true
+			}
+		}
+	}
+
+	if err == nil && !needsFallback {
+		// If successful and clean, delete the old m3u8 and ts files
 		dir := filepath.Dir(outputFile)
 		base := strings.TrimSuffix(filepath.Base(outputFile), filepath.Ext(outputFile))
 		files, _ := os.ReadDir(dir)
@@ -145,7 +162,11 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 		outputFile = mp4OutputFile
 	} else {
 		if isIPTV {
-			log.Printf("[dvr] instant remux failed (ad slip-through detected): %v, out: %s", err, string(out))
+			if needsFallback {
+				log.Printf("[dvr] instant remux produced corrupt file (multiple video streams), triggering fallback transcode...")
+			} else {
+				log.Printf("[dvr] instant remux failed (ad slip-through detected): %v, out: %s", err, string(out))
+			}
 			log.Printf("[dvr] falling back to full transcode for %s (this will take longer)...", outputFile)
 			
 			fallbackCmd := exec.Command("ffmpeg", "-merge_pmt_versions", "1", "-err_detect", "ignore_err", "-i", outputFile, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-r", "30", "-vf", "scale=-2:720", "-c:a", "aac", "-async", "1", "-movflags", "+faststart", "-y", mp4OutputFile)
