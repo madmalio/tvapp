@@ -133,19 +133,14 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 	
 	out, err := cmd.CombinedOutput()
 	
-	// ffmpeg -c copy will often silently succeed but create a corrupt MP4 with multiple video streams
-	// if a resolution change occurred during an ad. We must detect this using ffprobe!
+	// ffmpeg -c copy will often silently succeed but create a corrupt MP4 
+	// if a resolution/PTS change occurred during an ad. We must detect this by parsing its output!
 	needsFallback := false
-	if isIPTV && err == nil {
-		probeCmd := exec.Command("ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=index", "-of", "csv=p=0", mp4OutputFile)
-		probeOut, probeErr := probeCmd.Output()
-		if probeErr == nil {
-			// Count the number of video streams (each line is a stream)
-			lines := strings.Split(strings.TrimSpace(string(probeOut)), "\n")
-			if len(lines) > 1 {
-				log.Printf("[dvr] detected %d video streams in instant remux (ad resolution change detected)", len(lines))
-				needsFallback = true
-			}
+	if isIPTV {
+		outStr := strings.ToLower(string(out))
+		if err != nil || strings.Contains(outStr, "non-monotonous") || strings.Contains(outStr, "invalid dts") || strings.Contains(outStr, "parameters changed") || strings.Contains(outStr, "changing video frame properties") {
+			log.Printf("[dvr] instant remux detected stream corruption in ffmpeg output, flagging for fallback transcode...")
+			needsFallback = true
 		}
 	}
 
