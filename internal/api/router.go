@@ -547,6 +547,7 @@ func hlsCleanPlaylist(body []byte, base *url.URL, basePath string, queryParams s
 	var out []string
 	var pendingEXTINF string
 	var inAdBreak bool
+	var currentKeyMethod string = "AES-128" // Assume encrypted by default
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -568,6 +569,16 @@ func hlsCleanPlaylist(body []byte, base *url.URL, basePath string, queryParams s
 			}
 		}
 
+		if strings.HasPrefix(trimmed, "#EXT-X-KEY:") {
+			if strings.Contains(trimmed, "METHOD=NONE") {
+				currentKeyMethod = "NONE"
+			} else if strings.Contains(trimmed, "METHOD=AES-128") || strings.Contains(trimmed, "METHOD=SAMPLE-AES") {
+				currentKeyMethod = "AES"
+			}
+			out = append(out, line)
+			continue
+		}
+
 		if strings.HasPrefix(trimmed, "#EXTINF:") {
 			pendingEXTINF = line
 			continue
@@ -577,7 +588,8 @@ func hlsCleanPlaylist(body []byte, base *url.URL, basePath string, queryParams s
 			isAd := false
 			if skipAds {
 				lower := strings.ToLower(trimmed)
-				if inAdBreak || strings.Contains(lower, "/ad/") || strings.Contains(lower, "stitch") || strings.Contains(lower, "creative") || strings.Contains(lower, "bumper") || strings.Contains(lower, "google") {
+				isUnencrypted := currentKeyMethod == "NONE"
+				if inAdBreak || isUnencrypted || strings.Contains(lower, "/ad/") || strings.Contains(lower, "stitch") || strings.Contains(lower, "creative") || strings.Contains(lower, "bumper") || strings.Contains(lower, "google") || strings.Contains(lower, "ssai") || strings.Contains(lower, "freewheel") || strings.Contains(lower, "silo") || strings.Contains(lower, "dai") || strings.Contains(lower, "adserver") {
 					isAd = true
 				}
 			}
