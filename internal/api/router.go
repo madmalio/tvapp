@@ -442,9 +442,8 @@ func proxyStreamHandler(w http.ResponseWriter, r *http.Request) {
 	if idx := strings.LastIndex(basePath, "/"); idx >= 0 {
 		basePath = basePath[:idx+1]
 	}
-	queryParams := finalURL.RawQuery
-
-	body = hlsCleanPlaylist(body, base, basePath, queryParams)
+	skipAds := r.URL.Query().Get("adskip") == "1"
+	body = hlsCleanPlaylist(body, base, basePath, skipAds)
 	w.Write(body)
 }
 
@@ -541,8 +540,7 @@ func resolveHLSURL(base *url.URL, raw string) string {
 	return base.ResolveReference(parsed).String()
 }
 
-func hlsCleanPlaylist(body []byte, base *url.URL, basePath string, queryParams string) []byte {
-	skipAds := strings.Contains(queryParams, "adskip=1")
+func hlsCleanPlaylist(body []byte, base *url.URL, basePath string, skipAds bool) []byte {
 	lines := strings.Split(string(body), "\n")
 	var out []string
 	var pendingEXTINF string
@@ -607,8 +605,8 @@ func hlsCleanPlaylist(body []byte, base *url.URL, basePath string, queryParams s
 				pendingEXTINF = ""
 			}
 
-			line = rewriteAllURIs(line, base, basePath, queryParams)
-			line = resolveURL(line, base, basePath, queryParams)
+			line = rewriteAllURIs(line, base, basePath, skipAds)
+			line = resolveURL(line, base, basePath, skipAds)
 			out = append(out, line)
 		} else {
 			if strings.HasPrefix(trimmed, "#EXT-X-STREAM-INF:") {
@@ -621,14 +619,14 @@ func hlsCleanPlaylist(body []byte, base *url.URL, basePath string, queryParams s
 				}
 				line = strings.Join(cleaned, ",")
 			}
-			line = rewriteAllURIs(line, base, basePath, queryParams)
+			line = rewriteAllURIs(line, base, basePath, skipAds)
 			out = append(out, line)
 		}
 	}
 	return []byte(strings.Join(out, "\n"))
 }
 
-func rewriteAllURIs(line string, base *url.URL, basePath string, queryParams string) string {
+func rewriteAllURIs(line string, base *url.URL, basePath string, skipAds bool) string {
 	var result strings.Builder
 	result.Grow(len(line) + 128)
 	remaining := line
@@ -646,27 +644,32 @@ func rewriteAllURIs(line string, base *url.URL, basePath string, queryParams str
 			break
 		}
 		orig := remaining[:end]
-		result.WriteString(resolveURL(orig, base, basePath, queryParams))
+		result.WriteString(resolveURL(orig, base, basePath, skipAds))
 		remaining = remaining[end:]
 	}
 	return result.String()
 }
 
-func resolveURL(raw string, base *url.URL, basePath string, queryParams string) string {
+func resolveURL(raw string, base *url.URL, basePath string, skipAds bool) string {
+	var proxyURL string
 	switch {
 	case strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://"):
-		return "/api/proxy?url=" + url.QueryEscape(raw)
+		proxyURL = "/api/proxy?url=" + url.QueryEscape(raw)
 	case strings.HasPrefix(raw, "//"):
 		raw = base.Scheme + ":" + raw
-		return "/api/proxy?url=" + url.QueryEscape(raw)
+		proxyURL = "/api/proxy?url=" + url.QueryEscape(raw)
 	case strings.HasPrefix(raw, "/"):
 		raw = base.Scheme + "://" + base.Host + raw
-		return "/api/proxy?url=" + url.QueryEscape(raw)
+		proxyURL = "/api/proxy?url=" + url.QueryEscape(raw)
 	default:
 		raw = base.Scheme + "://" + base.Host + basePath + raw
-		raw = appendQuery(raw, queryParams)
-		return "/api/proxy?url=" + url.QueryEscape(raw)
+		proxyURL = "/api/proxy?url=" + url.QueryEscape(raw)
 	}
+
+	if skipAds {
+		proxyURL += "&adskip=1"
+	}
+	return proxyURL
 }
 
 func parseMediaSequence(body string) int {
