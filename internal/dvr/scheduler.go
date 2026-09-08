@@ -125,7 +125,12 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 	var tsFiles []string
 	for _, f := range files {
 		if strings.HasPrefix(f.Name(), base) && strings.HasSuffix(f.Name(), ".ts") {
-			tsFiles = append(tsFiles, f.Name())
+			info, err := f.Info()
+			if err == nil && info.Size() > 1024 { // filter out empty chunks from EXT-X-GAP restarts
+				tsFiles = append(tsFiles, f.Name())
+			} else {
+				os.Remove(filepath.Join(dir, f.Name()))
+			}
 		}
 	}
 	

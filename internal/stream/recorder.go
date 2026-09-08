@@ -105,7 +105,59 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(durationSec+5)*time.Second)
 	defer cancel()
 
-	// Standard execution for all tuners (M3U8 output)
+	if tunerType != "hdhomerun" && tunerType != "rtsp" {
+		hlsBase := strings.TrimSuffix(outputFile, filepath.Ext(outputFile))
+		chunkIndex := 0
+		startTime := time.Now()
+
+		for {
+			elapsed := time.Since(startTime)
+			remaining := durationSec - int(elapsed.Seconds())
+			if remaining <= 0 || ctx.Err() != nil {
+				break
+			}
+
+			chunkFile := fmt.Sprintf("%s_%05d.ts", hlsBase, chunkIndex)
+			chunkIndex++
+
+			args = []string{
+				"-user_agent", userAgent,
+				"-headers", headers,
+				"-live_start_index", "-1",
+				"-err_detect", "ignore_err",
+				"-fflags", "+genpts+igndts",
+				"-i", streamURL,
+				"-t", strconv.Itoa(remaining),
+				"-c", "copy",
+				"-f", "mpegts",
+				chunkFile,
+			}
+
+			cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+
+			recordingsMutex.Lock()
+			activeRecordings[recordingID] = cmd
+			recordingsMutex.Unlock()
+
+			log.Printf("[dvr] starting/resuming iptv chunk %d for %ds", chunkIndex-1, remaining)
+			err := cmd.Run()
+			
+			recordingsMutex.Lock()
+			delete(activeRecordings, recordingID)
+			recordingsMutex.Unlock()
+
+			if ctx.Err() != nil || (err != nil && (strings.Contains(err.Error(), "killed") || strings.Contains(err.Error(), "exit status 255"))) {
+				log.Printf("[dvr] recording %d stopped manually or timed out", recordingID)
+				break
+			}
+			
+			log.Printf("[dvr] ffmpeg exited (likely ad break or EXT-X-GAP). Restarting next chunk in 2s...")
+			time.Sleep(2 * time.Second)
+		}
+		return nil
+	}
+
+	// Standard execution for HDHomeRun and RTSP (M3U8 output)
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	
 	recordingsMutex.Lock()
