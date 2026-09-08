@@ -594,6 +594,11 @@ func hlsCleanPlaylist(body []byte, base *url.URL, basePath string, skipAds bool)
 
 			if isAd {
 				log.Printf("[proxy-debug] DROPPED AD CHUNK: %s (inAdBreak=%v, currentKey=%s)", trimmed, inAdBreak, currentKeyMethod)
+				if pendingEXTINF != "" {
+					out = append(out, pendingEXTINF)
+					out = append(out, "#EXT-X-GAP")
+					out = append(out, "ad_gap.ts")
+				}
 				pendingEXTINF = ""
 				continue
 			}
