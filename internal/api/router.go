@@ -589,7 +589,7 @@ func hlsCleanPlaylist(body []byte, base *url.URL, basePath string, queryParams s
 			if skipAds {
 				lower := strings.ToLower(trimmed)
 				isUnencrypted := currentKeyMethod == "NONE"
-				if inAdBreak || isUnencrypted || strings.Contains(lower, "/ad/") || strings.Contains(lower, "stitch") || strings.Contains(lower, "creative") || strings.Contains(lower, "bumper") || strings.Contains(lower, "google") || strings.Contains(lower, "ssai") || strings.Contains(lower, "freewheel") || strings.Contains(lower, "silo") || strings.Contains(lower, "dai") || strings.Contains(lower, "adserver") {
+				if inAdBreak || isUnencrypted || strings.Contains(lower, "/ad/") || strings.Contains(lower, "_ad_") || strings.Contains(lower, "stitch") || strings.Contains(lower, "creative") || strings.Contains(lower, "bumper") || strings.Contains(lower, "google") || strings.Contains(lower, "ssai") || strings.Contains(lower, "freewheel") || strings.Contains(lower, "silo") || strings.Contains(lower, "dai") || strings.Contains(lower, "adserver") || strings.Contains(lower, "promo") || strings.Contains(lower, "slate") || strings.Contains(lower, "commercial") || strings.Contains(lower, "sponsor") || strings.Contains(lower, "advert") {
 					isAd = true
 				}
 			}

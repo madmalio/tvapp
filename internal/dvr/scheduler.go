@@ -138,7 +138,7 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 	needsFallback := false
 	if isIPTV {
 		outStr := strings.ToLower(string(out))
-		if err != nil || strings.Contains(outStr, "non-monotonous") || strings.Contains(outStr, "invalid dts") || strings.Contains(outStr, "parameters changed") || strings.Contains(outStr, "changing video frame properties") {
+		if err != nil || strings.Contains(outStr, "non-monotonous") || strings.Contains(outStr, "invalid dts") || strings.Contains(outStr, "parameters changed") || strings.Contains(outStr, "changing video frame properties") || strings.Contains(outStr, "discontinuity") {
 			log.Printf("[dvr] instant remux detected stream corruption in ffmpeg output, flagging for fallback transcode...")
 			needsFallback = true
 		}
