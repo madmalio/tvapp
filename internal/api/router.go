@@ -595,9 +595,12 @@ func hlsCleanPlaylist(body []byte, base *url.URL, basePath string, queryParams s
 			}
 
 			if isAd {
+				log.Printf("[proxy-debug] DROPPED AD CHUNK: %s (inAdBreak=%v, currentKey=%s)", trimmed, inAdBreak, currentKeyMethod)
 				pendingEXTINF = ""
 				continue
 			}
+
+			// log.Printf("[proxy-debug] KEPT PROGRAM CHUNK: %s", trimmed) // uncomment if needed, but it spams
 
 			if pendingEXTINF != "" {
 				out = append(out, pendingEXTINF)
