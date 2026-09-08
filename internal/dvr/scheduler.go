@@ -94,8 +94,9 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 	safeTitle := strings.ReplaceAll(r.Title, " ", "_")
 	safeTitle = strings.ReplaceAll(safeTitle, "/", "-")
 	
-	ext := ".ts"
-	if ch.TunerType == "hdhomerun" || ch.TunerType == "rtsp" {
+	// For live transcoding, all DVR recordings output to an HLS playlist first, then get remuxed to MP4
+	ext := ".m3u8"
+	if ch.TunerType == "rtsp" {
 		ext = ".m3u8"
 	}
 	filename := fmt.Sprintf("%s_%d%s", safeTitle, r.ID, ext)
