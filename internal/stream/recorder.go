@@ -122,10 +122,10 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 				"-headers", headers,
 				"-live_start_index", "-1",
 				"-err_detect", "ignore_err",
+				"-fflags", "+genpts+igndts",
 				"-i", streamURL,
 				"-t", strconv.Itoa(remaining),
 				"-c", "copy",
-				"-copyts",
 				"-f", "mpegts",
 				"pipe:1",
 			}
