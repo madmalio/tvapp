@@ -2,6 +2,10 @@ package stream
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -177,9 +181,52 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 				}
 			}
 
+			var currentKey []byte
+			var currentIV []byte
+			var keyMethod string = "NONE"
+
 			// Parse chunks
 			for i := 0; i < len(lines); i++ {
 				line := strings.TrimSpace(lines[i])
+
+				if strings.HasPrefix(line, "#EXT-X-KEY:") {
+					if strings.Contains(line, "METHOD=NONE") {
+						keyMethod = "NONE"
+					} else if strings.Contains(line, "METHOD=AES-128") {
+						keyMethod = "AES-128"
+						uriStart := strings.Index(line, `URI="`) + 5
+						uriEnd := strings.Index(line[uriStart:], `"`)
+						if uriStart >= 5 && uriEnd >= 0 {
+							keyURI := line[uriStart : uriStart+uriEnd]
+							if !strings.HasPrefix(keyURI, "http") {
+								baseURL, _ := url.Parse(streamURL)
+								rel, _ := url.Parse(keyURI)
+								keyURI = baseURL.ResolveReference(rel).String()
+							}
+							kreq, _ := http.NewRequestWithContext(ctx, "GET", keyURI, nil)
+							for k, v := range reqHeaders {
+								kreq.Header.Set(k, v)
+							}
+							kresp, _ := client.Do(kreq)
+							if kresp != nil && kresp.StatusCode == 200 {
+								currentKey, _ = io.ReadAll(kresp.Body)
+								kresp.Body.Close()
+							}
+						}
+						ivStart := strings.Index(line, "IV=0x")
+						if ivStart >= 0 {
+							ivStr := line[ivStart+5:]
+							if comma := strings.Index(ivStr, ","); comma >= 0 {
+								ivStr = ivStr[:comma]
+							}
+							currentIV, _ = hex.DecodeString(ivStr)
+						} else {
+							currentIV = nil
+						}
+					}
+					continue
+				}
+
 				if strings.HasPrefix(line, "#EXTINF:") {
 					var uri string
 					for j := i + 1; j < len(lines); j++ {
@@ -208,7 +255,26 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 								if cerr == nil && cresp.StatusCode == 200 {
 									chunkData, _ := io.ReadAll(cresp.Body)
 									cresp.Body.Close()
+									
 									if len(chunkData) > 1024 {
+										// Decrypt AES-128
+										if keyMethod == "AES-128" && len(currentKey) == 16 && len(chunkData)%16 == 0 {
+											iv := currentIV
+											if len(iv) != 16 {
+												iv = make([]byte, 16)
+												binary.BigEndian.PutUint64(iv[8:], uint64(seq))
+											}
+											block, _ := aes.NewCipher(currentKey)
+											mode := cipher.NewCBCDecrypter(block, iv)
+											mode.CryptBlocks(chunkData, chunkData)
+											
+											// PKCS7 unpadding
+											padLen := int(chunkData[len(chunkData)-1])
+											if padLen > 0 && padLen <= 16 {
+												chunkData = chunkData[:len(chunkData)-padLen]
+											}
+										}
+
 										chunkFile := fmt.Sprintf("%s_%05d.ts", hlsBase, chunkIndex)
 										os.WriteFile(chunkFile, chunkData, 0644)
 										chunkIndex++
