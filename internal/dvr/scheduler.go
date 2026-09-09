@@ -137,6 +137,7 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 	
 	if len(tsFiles) > 0 {
 		concatPath := filepath.Join(dir, fmt.Sprintf("concat_%d.txt", r.ID))
+		defer os.Remove(concatPath)
 		var concatContent strings.Builder
 		for _, ts := range tsFiles {
 			// Because chunks are padded (e.g. _00001.ts), ReadDir's lexicographical sort is correct.
@@ -154,7 +155,6 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 			log.Printf("[dvr] instant concat successful for %s", mp4OutputFile)
 			
 			// Clean up HLS chunks, playlist, and concat file
-			os.Remove(concatPath)
 			for _, f := range files {
 				if strings.HasPrefix(f.Name(), base) && !strings.HasSuffix(f.Name(), ".mp4") {
 					os.Remove(filepath.Join(dir, f.Name()))
