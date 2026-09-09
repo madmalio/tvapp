@@ -104,14 +104,21 @@ func deleteRecording(w http.ResponseWriter, r *http.Request) {
 		safeTitle := strings.ReplaceAll(rec.Title, " ", "_")
 		safeTitle = strings.ReplaceAll(safeTitle, "/", "-")
 		base := fmt.Sprintf("%s_%d", safeTitle, id)
-		dir := "recordings"
+		
+		dvrPath := db.GetSetting("dvr_path", "recordings")
+		recordingDir := filepath.Join(dvrPath, safeTitle)
 
-		files, _ := os.ReadDir(dir)
+		files, _ := os.ReadDir(recordingDir)
 		for _, f := range files {
 			if strings.HasPrefix(f.Name(), base) {
-				os.Remove(filepath.Join(dir, f.Name()))
+				os.Remove(filepath.Join(recordingDir, f.Name()))
 			}
 		}
+		
+		// Attempt to delete the directory. 
+		// os.Remove on a directory only succeeds if it is completely empty.
+		// If there are other episodes of the same show in here, this will safely fail and do nothing!
+		os.Remove(recordingDir)
 	}
 
 	if err := db.DeleteRecording(id); err != nil {
