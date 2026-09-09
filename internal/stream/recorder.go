@@ -18,15 +18,23 @@ import (
 
 var (
 	activeRecordings = make(map[int]*exec.Cmd)
+	recordingCancels = make(map[int]context.CancelFunc)
 	recordingsMutex  sync.Mutex
 )
 
 func StopRecording(recordingID int) {
 	recordingsMutex.Lock()
-	cmd, ok := activeRecordings[recordingID]
+	cmd, okCmd := activeRecordings[recordingID]
+	cancel, okCancel := recordingCancels[recordingID]
 	recordingsMutex.Unlock()
-	if ok && cmd != nil && cmd.Process != nil {
-		log.Printf("[dvr] manually stopping recording %d", recordingID)
+
+	if okCancel && cancel != nil {
+		log.Printf("[dvr] manually cancelling context for recording %d", recordingID)
+		cancel()
+	}
+
+	if okCmd && cmd != nil && cmd.Process != nil {
+		log.Printf("[dvr] manually killing process for recording %d", recordingID)
 		cmd.Process.Kill()
 	}
 }
@@ -107,23 +115,22 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(durationSec+5)*time.Second)
 	defer cancel()
 
+	recordingsMutex.Lock()
+	recordingCancels[recordingID] = cancel
+	recordingsMutex.Unlock()
+
+	defer func() {
+		recordingsMutex.Lock()
+		delete(recordingCancels, recordingID)
+		recordingsMutex.Unlock()
+	}()
+
 	if tunerType != "hdhomerun" && tunerType != "rtsp" {
 		// Custom Go HLS downloader for IPTV.
 		// Bypasses all FFmpeg crash/gap issues by parsing the playlist ourselves,
 		// perfectly tracking media sequences, and skipping ad_gap.ts natively.
 		hlsBase := strings.TrimSuffix(outputFile, filepath.Ext(outputFile))
 		
-		// Register a dummy command so the stop button works (we just kill context)
-		recordingsMutex.Lock()
-		activeRecordings[recordingID] = exec.CommandContext(ctx, "sleep", "infinity")
-		recordingsMutex.Unlock()
-
-		defer func() {
-			recordingsMutex.Lock()
-			delete(activeRecordings, recordingID)
-			recordingsMutex.Unlock()
-		}()
-
 		client := &http.Client{Timeout: 10 * time.Second}
 		reqHeaders := make(map[string]string)
 		if headers != "" {
