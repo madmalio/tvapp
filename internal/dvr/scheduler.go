@@ -174,25 +174,14 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 			log.Printf("[dvr] HDHomeRun transcode failed: %v, out: %s", err, string(out))
 		}
 	} else if len(tsFiles) > 0 {
-		m3u8Path := outputFile // outputFile already ends in .m3u8
-		var m3u8Content strings.Builder
-		m3u8Content.WriteString("#EXTM3U\n")
-		m3u8Content.WriteString("#EXT-X-VERSION:3\n")
-		m3u8Content.WriteString("#EXT-X-TARGETDURATION:10\n")
-		m3u8Content.WriteString("#EXT-X-PLAYLIST-TYPE:VOD\n")
-
 		concatPath := filepath.Join(dir, fmt.Sprintf("concat_%d.txt", r.ID))
 		defer os.Remove(concatPath)
 		var concatContent strings.Builder
 		for _, ts := range tsFiles {
 			// Because chunks are padded (e.g. _00001.ts), ReadDir's lexicographical sort is correct.
 			concatContent.WriteString(fmt.Sprintf("file '%s'\n", ts))
-			m3u8Content.WriteString(fmt.Sprintf("#EXTINF:10.000,\n%s\n", filepath.Base(ts)))
 		}
-		m3u8Content.WriteString("#EXT-X-ENDLIST\n")
 		
-		// Write the standard m3u8 playlist for Android TV / external clients
-		os.WriteFile(m3u8Path, []byte(m3u8Content.String()), 0644)
 		// Write the ffmpeg concat list for the MP4 generation
 		os.WriteFile(concatPath, []byte(concatContent.String()), 0644)
 		

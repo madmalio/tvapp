@@ -147,6 +147,10 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 		endTime := time.Now().Add(time.Duration(durationSec) * time.Second)
 		lastSeq := -1
 		chunkIndex := 0
+		needsDiscontinuity := false
+
+		// Initialize the native m3u8 playlist file
+		os.WriteFile(outputFile, []byte("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:15\n#EXT-X-PLAYLIST-TYPE:VOD\n"), 0644)
 
 		log.Printf("[dvr] starting native go iptv downloader for %ds", durationSec)
 
@@ -272,8 +276,23 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 
 										chunkFile := fmt.Sprintf("%s_%05d.ts", hlsBase, chunkIndex)
 										os.WriteFile(chunkFile, chunkData, 0644)
+										
+										// Append to native M3U8 playlist
+										f, _ := os.OpenFile(outputFile, os.O_APPEND|os.O_WRONLY, 0644)
+										if needsDiscontinuity {
+											f.WriteString("#EXT-X-DISCONTINUITY\n")
+											needsDiscontinuity = false
+										}
+										f.WriteString(fmt.Sprintf("%s\n%s\n", line, filepath.Base(chunkFile)))
+										f.Close()
+
 										chunkIndex++
 									}
+								}
+							} else {
+								// Ad gap detected! Mark for discontinuity
+								if chunkIndex > 0 {
+									needsDiscontinuity = true
 								}
 							}
 							lastSeq = seq
@@ -284,6 +303,13 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 			}
 			time.Sleep(4 * time.Second)
 		}
+		
+		f, err := os.OpenFile(outputFile, os.O_APPEND|os.O_WRONLY, 0644)
+		if err == nil {
+			f.WriteString("#EXT-X-ENDLIST\n")
+			f.Close()
+		}
+		
 		return nil
 	}
 
