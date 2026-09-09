@@ -192,12 +192,13 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 		if err == nil {
 			log.Printf("[dvr] instant concat successful for %s", mp4OutputFile)
 			
-			// Clean up HLS chunks, playlist, and concat file
-			for _, f := range files {
-				if strings.HasPrefix(f.Name(), base) && !strings.HasSuffix(f.Name(), ".mp4") {
-					os.Remove(filepath.Join(dir, f.Name()))
-				}
-			}
+			// COMMENTED OUT: Preserve the raw HLS chunks and .m3u8 playlist for Android TV!
+			// for _, f := range files {
+			// 	if strings.HasPrefix(f.Name(), base) && !strings.HasSuffix(f.Name(), ".mp4") {
+			// 		os.Remove(filepath.Join(dir, f.Name()))
+			// 	}
+			// }
+			
 			outputFile = mp4OutputFile
 		} else {
 			log.Printf("[dvr] concat failed: %v, out: %s", err, string(out))
