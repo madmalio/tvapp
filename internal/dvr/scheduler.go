@@ -98,10 +98,14 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 	if ch.TunerType == "hdhomerun" {
 		ext = ".ts"
 	}
+
 	filename := fmt.Sprintf("%s_%d%s", safeTitle, r.ID, ext)
 	
 	dvrPath := db.GetSetting("dvr_path", "recordings")
-	outputFile := filepath.Join(dvrPath, filename)
+	recordingDir := filepath.Join(dvrPath, safeTitle)
+	os.MkdirAll(recordingDir, 0755)
+
+	outputFile := filepath.Join(recordingDir, filename)
 
 	err = stream.RecordStream(r.ID, ch.StreamURL, ch.TunerType, durationSec, outputFile)
 	if err != nil {
@@ -136,7 +140,7 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 	// Package the HLS chunks into a gapless MP4 using the concat demuxer.
 	// This natively rewrites PTS timestamps across ad gaps, resulting in a perfect MP4 without transcoding!
 	mp4Filename := fmt.Sprintf("%s_%d.mp4", safeTitle, r.ID)
-	mp4OutputFile := filepath.Join(dvrPath, mp4Filename)
+	mp4OutputFile := filepath.Join(recordingDir, mp4Filename)
 	
 	if ch.TunerType == "hdhomerun" {
 		db.UpdateRecordingStatus(r.ID, "processing", "")
@@ -164,7 +168,7 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 		
 		if err == nil {
 			log.Printf("[dvr] HDHomeRun transcode successful for %s", mp4OutputFile)
-			os.Remove(outputFile) // Clean up the raw .ts
+			// os.Remove(outputFile) // COMMENTED OUT: Preserve the raw .ts file for Android TV / external clients!
 			outputFile = mp4OutputFile
 		} else {
 			log.Printf("[dvr] HDHomeRun transcode failed: %v, out: %s", err, string(out))
