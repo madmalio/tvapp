@@ -147,7 +147,7 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 		db.UpdateRecordingStatus(r.ID, "processing", "")
 		log.Printf("[dvr] concatenating %d chunks into MP4 to eliminate PTS gaps...", len(tsFiles))
 		
-		cmd := exec.Command("ffmpeg", "-f", "concat", "-safe", "0", "-i", concatPath, "-c", "copy", "-movflags", "+faststart", mp4OutputFile)
+		cmd := exec.Command("ffmpeg", "-f", "concat", "-safe", "0", "-i", concatPath, "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", mp4OutputFile)
 		out, err := cmd.CombinedOutput()
 		
 		if err == nil {
