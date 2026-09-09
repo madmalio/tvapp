@@ -3,7 +3,9 @@ package stream
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -106,52 +108,113 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 	defer cancel()
 
 	if tunerType != "hdhomerun" && tunerType != "rtsp" {
+		// Custom Go HLS downloader for IPTV.
+		// Bypasses all FFmpeg crash/gap issues by parsing the playlist ourselves,
+		// perfectly tracking media sequences, and skipping ad_gap.ts natively.
 		hlsBase := strings.TrimSuffix(outputFile, filepath.Ext(outputFile))
-		chunkIndex := 0
-		startTime := time.Now()
+		
+		// Register a dummy command so the stop button works (we just kill context)
+		recordingsMutex.Lock()
+		activeRecordings[recordingID] = exec.CommandContext(ctx, "sleep", "infinity")
+		recordingsMutex.Unlock()
 
-		for {
-			elapsed := time.Since(startTime)
-			remaining := durationSec - int(elapsed.Seconds())
-			if remaining <= 0 || ctx.Err() != nil {
-				break
-			}
-
-			chunkFile := fmt.Sprintf("%s_%05d.ts", hlsBase, chunkIndex)
-			chunkIndex++
-
-			args = []string{
-				"-user_agent", userAgent,
-				"-headers", headers,
-				"-live_start_index", "-1",
-				"-err_detect", "ignore_err",
-				"-i", streamURL,
-				"-t", strconv.Itoa(remaining),
-				"-c", "copy",
-				"-f", "mpegts",
-				chunkFile,
-			}
-
-			cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-
-			recordingsMutex.Lock()
-			activeRecordings[recordingID] = cmd
-			recordingsMutex.Unlock()
-
-			log.Printf("[dvr] starting/resuming iptv chunk %d for %ds", chunkIndex-1, remaining)
-			err := cmd.Run()
-			
+		defer func() {
 			recordingsMutex.Lock()
 			delete(activeRecordings, recordingID)
 			recordingsMutex.Unlock()
+		}()
 
-			if ctx.Err() != nil || (err != nil && (strings.Contains(err.Error(), "killed") || strings.Contains(err.Error(), "exit status 255"))) {
-				log.Printf("[dvr] recording %d stopped manually or timed out", recordingID)
-				break
+		client := &http.Client{Timeout: 10 * time.Second}
+		reqHeaders := make(map[string]string)
+		if headers != "" {
+			for _, h := range strings.Split(headers, "\r\n") {
+				parts := strings.SplitN(h, ": ", 2)
+				if len(parts) == 2 {
+					reqHeaders[parts[0]] = parts[1]
+				}
+			}
+		}
+		if reqHeaders["User-Agent"] == "" {
+			reqHeaders["User-Agent"] = userAgent
+		}
+
+		endTime := time.Now().Add(time.Duration(durationSec) * time.Second)
+		lastSeq := -1
+		chunkIndex := 0
+
+		log.Printf("[dvr] starting native go iptv downloader for %ds", durationSec)
+
+		for time.Now().Before(endTime) && ctx.Err() == nil {
+			req, err := http.NewRequestWithContext(ctx, "GET", streamURL, nil)
+			if err != nil {
+				return err
+			}
+			for k, v := range reqHeaders {
+				req.Header.Set(k, v)
 			}
 			
-			log.Printf("[dvr] ffmpeg exited (likely ad break or EXT-X-GAP). Restarting next chunk in 2s...")
-			time.Sleep(2 * time.Second)
+			resp, err := client.Do(req)
+			if err != nil {
+				time.Sleep(2 * time.Second)
+				continue
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			lines := strings.Split(string(body), "\n")
+			seq := 0
+			for _, line := range lines {
+				if strings.HasPrefix(line, "#EXT-X-MEDIA-SEQUENCE:") {
+					fmt.Sscanf(line, "#EXT-X-MEDIA-SEQUENCE:%d", &seq)
+					break
+				}
+			}
+
+			// Parse chunks
+			for i := 0; i < len(lines); i++ {
+				line := strings.TrimSpace(lines[i])
+				if strings.HasPrefix(line, "#EXTINF:") {
+					var uri string
+					for j := i + 1; j < len(lines); j++ {
+						l := strings.TrimSpace(lines[j])
+						if l != "" && !strings.HasPrefix(l, "#") {
+							uri = l
+							break
+						}
+					}
+					
+					if uri != "" {
+						if seq > lastSeq {
+							if uri != "ad_gap.ts" && !strings.Contains(uri, "ad_gap") {
+								chunkURL := uri
+								if !strings.HasPrefix(chunkURL, "http") {
+									baseURL, _ := url.Parse(streamURL)
+									rel, _ := url.Parse(chunkURL)
+									chunkURL = baseURL.ResolveReference(rel).String()
+								}
+								
+								creq, _ := http.NewRequestWithContext(ctx, "GET", chunkURL, nil)
+								for k, v := range reqHeaders {
+									creq.Header.Set(k, v)
+								}
+								cresp, cerr := client.Do(creq)
+								if cerr == nil && cresp.StatusCode == 200 {
+									chunkData, _ := io.ReadAll(cresp.Body)
+									cresp.Body.Close()
+									if len(chunkData) > 1024 {
+										chunkFile := fmt.Sprintf("%s_%05d.ts", hlsBase, chunkIndex)
+										os.WriteFile(chunkFile, chunkData, 0644)
+										chunkIndex++
+									}
+								}
+							}
+							lastSeq = seq
+						}
+						seq++
+					}
+				}
+			}
+			time.Sleep(4 * time.Second)
 		}
 		return nil
 	}
