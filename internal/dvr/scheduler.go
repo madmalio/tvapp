@@ -95,6 +95,9 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 	safeTitle = strings.ReplaceAll(safeTitle, "/", "-")
 	
 	ext := ".m3u8"
+	if ch.TunerType == "hdhomerun" {
+		ext = ".ts"
+	}
 	filename := fmt.Sprintf("%s_%d%s", safeTitle, r.ID, ext)
 	
 	dvrPath := db.GetSetting("dvr_path", "recordings")
@@ -135,7 +138,24 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 	mp4Filename := fmt.Sprintf("%s_%d.mp4", safeTitle, r.ID)
 	mp4OutputFile := filepath.Join(dvrPath, mp4Filename)
 	
-	if len(tsFiles) > 0 {
+	if ch.TunerType == "hdhomerun" {
+		db.UpdateRecordingStatus(r.ID, "processing", "")
+		log.Printf("[dvr] transcoding raw HDHomeRun TS to MP4 (this may take a while)...")
+		
+		cmdArgs := append([]string{"-i", outputFile}, stream.GetOptimalVideoArgs("1080p_high")...)
+		cmdArgs = append(cmdArgs, "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", mp4OutputFile)
+		
+		cmd := exec.Command("ffmpeg", cmdArgs...)
+		out, err := cmd.CombinedOutput()
+		
+		if err == nil {
+			log.Printf("[dvr] HDHomeRun transcode successful for %s", mp4OutputFile)
+			os.Remove(outputFile) // Clean up the raw .ts
+			outputFile = mp4OutputFile
+		} else {
+			log.Printf("[dvr] HDHomeRun transcode failed: %v, out: %s", err, string(out))
+		}
+	} else if len(tsFiles) > 0 {
 		concatPath := filepath.Join(dir, fmt.Sprintf("concat_%d.txt", r.ID))
 		defer os.Remove(concatPath)
 		var concatContent strings.Builder

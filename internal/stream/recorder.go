@@ -76,6 +76,8 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 			outputFile,
 		}
 	} else if tunerType == "hdhomerun" {
+		// Record Raw, Transcode Later. 
+		// Dump the MPEG-2 stream directly to a TS file without transcoding live.
 		args = []string{
 			"-user_agent", userAgent,
 		}
@@ -85,15 +87,8 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 		args = append(args,
 			"-i", streamURL,
 			"-t", strconv.Itoa(durationSec),
-		)
-		args = append(args, GetOptimalVideoArgs("1080p_high")...)
-		args = append(args,
-			"-c:a", "aac",
-			"-b:a", "256k",
-			"-f", "hls",
-			"-hls_time", "6",
-			"-hls_list_size", "0",
-			"-hls_segment_filename", segmentFile,
+			"-c", "copy",
+			"-f", "mpegts",
 			outputFile,
 		)
 	} else {
@@ -311,10 +306,12 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 	if err != nil {
 		if strings.Contains(err.Error(), "killed") || strings.Contains(err.Error(), "terminated") || strings.Contains(err.Error(), "interrupt") || strings.Contains(err.Error(), "exit status 255") {
 			log.Printf("[dvr] recording %d stopped manually", recordingID)
-			f, err := os.OpenFile(outputFile, os.O_APPEND|os.O_WRONLY, 0644)
-			if err == nil {
-				f.WriteString("\n#EXT-X-ENDLIST\n")
-				f.Close()
+			if strings.HasSuffix(outputFile, ".m3u8") {
+				f, err := os.OpenFile(outputFile, os.O_APPEND|os.O_WRONLY, 0644)
+				if err == nil {
+					f.WriteString("\n#EXT-X-ENDLIST\n")
+					f.Close()
+				}
 			}
 			return nil
 		}
