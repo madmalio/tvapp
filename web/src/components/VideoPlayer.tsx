@@ -403,6 +403,8 @@ export default function VideoPlayer() {
     // that plague PlutoTV News/Sports, and fixes audio drift on Music channels.
     const shouldRunFFmpeg = channel.tuner_type === "hdhomerun" || isMusic || isNews || isSports;
 
+    let isMounted = true;
+
     if (shouldRunFFmpeg) {
       setStatus("Starting stream...");
       fetch(getApiUrl("/api/stream/start"), {
@@ -419,12 +421,20 @@ export default function VideoPlayer() {
         return r.json();
       })
       .then(data => {
+        if (!isMounted) {
+          // Component unmounted while fetch was happening. Immediately stop the orphaned stream to free the tuner!
+          fetch(getApiUrl(`/api/stream/stop/${data.id}`), { 
+            method: "DELETE",
+            keepalive: true
+          }).catch(console.error);
+          return;
+        }
         streamSessionIdRef.current = data.id;
         startPlayback(video, getApiUrl(data.manifest_url));
       })
       .catch(err => {
         console.error(err);
-        setStatus("Stream error");
+        if (isMounted) setStatus("Stream error");
       });
     } else {
       startPlayback(video, getProxyUrl());
@@ -508,8 +518,12 @@ export default function VideoPlayer() {
     }
 
     return () => {
+      isMounted = false;
       if (streamSessionIdRef.current) {
-        fetch(getApiUrl(`/api/stream/stop/${streamSessionIdRef.current}`), { method: "DELETE" }).catch(console.error);
+        fetch(getApiUrl(`/api/stream/stop/${streamSessionIdRef.current}`), { 
+          method: "DELETE", 
+          keepalive: true 
+        }).catch(console.error);
         streamSessionIdRef.current = null;
       }
       const hls = hlsRef.current;

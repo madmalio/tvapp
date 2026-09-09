@@ -26,7 +26,7 @@ type Toast = {
 
 export default function Recordings() {
   const navigate = useNavigate();
-  const { data: recordings, refetch } = useApi<Recording[]>("/api/recordings");
+  const { data: recordings, refetch } = useApi<Recording[]>("/api/recordings", 5000);
   const [activeTab, setActiveTab] = useState<"library" | "scheduled">("library");
   const [showDeleteModal, setShowDeleteModal] = useState<number | null>(null);
 

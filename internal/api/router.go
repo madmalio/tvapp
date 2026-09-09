@@ -108,13 +108,18 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 			}
 		}
 		
-		content, err := fs.ReadFile(distFS, "index.html")
-		if err != nil {
+		// Fallback to index.html for SPA routing
+		file, err := distFS.Open("index.html")
+		if err == nil {
+			stat, _ := file.Stat()
+			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
+			w.Header().Set("Pragma", "no-cache")
+			w.Header().Set("Expires", "0")
+			http.ServeContent(w, req, "index.html", stat.ModTime(), file.(io.ReadSeeker))
+		} else {
 			http.NotFound(w, req)
 			return
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(content)
 	})
 
 	return r

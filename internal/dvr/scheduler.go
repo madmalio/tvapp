@@ -142,8 +142,22 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 		db.UpdateRecordingStatus(r.ID, "processing", "")
 		log.Printf("[dvr] transcoding raw HDHomeRun TS to MP4 (this may take a while)...")
 		
-		cmdArgs := append([]string{"-i", outputFile}, stream.GetOptimalVideoArgs("1080p_high")...)
-		cmdArgs = append(cmdArgs, "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", mp4OutputFile)
+		// Use dedicated offline transcode arguments instead of live-streaming args to guarantee smooth playback
+		cmdArgs := []string{
+			"-fflags", "+genpts",
+			"-ss", "2", // Input seeking is required to actually skip the broken frames before decoding starts
+			"-i", outputFile,
+			"-async", "1", // Use classic async to stretch/squeeze audio to match video timestamps
+			"-fps_mode", "cfr",
+			"-c:v", "libx264",
+			"-preset", "veryfast", // Slower than ultrafast, but compresses much better (smaller file, lower bitrate)
+			"-crf", "25", // Slightly lower quality to reduce bitrate
+			"-vf", "bwdif,scale=-2:720", // Deinterlace AND scale down to 720p to prevent browser playback pausing
+			"-c:a", "aac",
+			"-b:a", "256k",
+			"-movflags", "+faststart",
+			mp4OutputFile,
+		}
 		
 		cmd := exec.Command("ffmpeg", cmdArgs...)
 		out, err := cmd.CombinedOutput()

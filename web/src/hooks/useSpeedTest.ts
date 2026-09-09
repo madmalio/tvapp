@@ -57,28 +57,12 @@ export function useSpeedTest() {
         
         globalSpeedMbps = mbps;
         
-        let targetQuality: StreamQuality = '360p_low';
-        if (mbps > 15) {
-          targetQuality = 'source';
-        } else if (mbps > 10) {
-          targetQuality = '1080p_high';
-        } else if (mbps > 6.25) {
-          targetQuality = '1080p_std';
-        } else if (mbps > 5) {
-          targetQuality = '720p_high';
-        } else if (mbps > 2.5) {
-          targetQuality = '720p_std';
-        } else if (mbps > 1.875) {
-          targetQuality = '480p_high';
-        } else if (mbps > 1.25) {
-          targetQuality = '480p_std';
-        } else {
-          targetQuality = '360p_low';
-        }
-
+        // We no longer automatically set the quality based on speedtest.
+        // The speedtest measures LAN speed (Browser -> Server), not WAN speed (Server -> Internet),
+        // which causes it to incorrectly default to 1080p on slow internet connections.
         if (!sessionStorage.getItem('userQualitySet')) {
-            globalPreferredQuality = targetQuality;
-            sessionStorage.setItem('preferredQuality', targetQuality);
+            globalPreferredQuality = 'source';
+            sessionStorage.setItem('preferredQuality', 'source');
         } else {
             globalPreferredQuality = (sessionStorage.getItem('preferredQuality') as StreamQuality) || 'source';
         }

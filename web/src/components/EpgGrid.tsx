@@ -55,7 +55,7 @@ function mapCategory(rawGroup: string, channelName: string = ""): string {
 
 export default function EpgGrid() {
   const { data: sourcesData, loading: sourcesLoading } = useApi<Source[]>('/api/sources');
-  const { data: recordings, refetch: refetchRecordings } = useApi<Recording[]>('/api/recordings');
+  const { data: recordings, refetch: refetchRecordings } = useApi<Recording[]>('/api/recordings', 5000);
   const scheduledKeys = useMemo(() => {
     const set = new Set<string>();
     if (recordings) {
@@ -262,10 +262,8 @@ export default function EpgGrid() {
                 backgroundStyle = { background: 'rgba(38, 38, 38, 0.8)' };
               }
 
-              const Wrapper: any = isActive ? Link : 'button';
-              const wrapperProps: any = isActive 
-                ? { to: `/player/${ch.id}`, state: { from: '/guide' }, onClick: () => lockToLandscape() }
-                : { onClick: () => setSelectedProgram({ entry: e, channel: ch }) };
+              const Wrapper: any = 'button';
+              const wrapperProps: any = { onClick: () => setSelectedProgram({ entry: e, channel: ch }) };
 
               return (
                 <div
@@ -297,7 +295,7 @@ export default function EpgGrid() {
         </div>
       );
     });
-  }, [sourceChannels, epgByChannel, gridStartTime, currentTime, currentTimeOffset, durationHours, activeCategory, visibleRows]);
+  }, [sourceChannels, epgByChannel, gridStartTime, currentTime, currentTimeOffset, durationHours, activeCategory, visibleRows, scheduledKeys]);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -481,6 +479,16 @@ export default function EpgGrid() {
               >
                 Close
               </button>
+              {new Date(selectedProgram.entry.start_time) <= currentTime && new Date(selectedProgram.entry.end_time) > currentTime && (
+                <Link 
+                  to={`/player/${selectedProgram.channel.id}`} 
+                  state={{ from: '/guide' }} 
+                  onClick={() => lockToLandscape()}
+                  className="px-5 py-2 rounded-lg font-medium bg-neutral-800 hover:bg-neutral-700 text-white transition-colors cursor-pointer border border-neutral-700"
+                >
+                  Watch Live
+                </Link>
+              )}
               {new Date(selectedProgram.entry.end_time) > currentTime ? (
                 (scheduledKeys.has(`epg:${selectedProgram.entry.id}`) || scheduledKeys.has(`time:${selectedProgram.channel.id}:${new Date(selectedProgram.entry.start_time).getTime()}`)) ? (
                   <button 
@@ -490,16 +498,24 @@ export default function EpgGrid() {
                         && (r.status === 'scheduled' || r.status === 'recording')
                       );
                       if (rec) {
-                        fetch(getApiUrl(`/api/recordings/${rec.id}`), { method: 'DELETE', headers: getApiHeaders() }).then(() => {
-                          addToast({ title: "Recording cancelled", type: "success" });
-                          setSelectedProgram(null);
-                          refetchRecordings();
-                        }).catch(() => addToast({ title: "Failed to cancel", type: "error" }));
+                        if (rec.status === 'recording') {
+                          fetch(getApiUrl(`/api/recordings/${rec.id}/stop`), { method: 'POST', headers: getApiHeaders() }).then(() => {
+                            addToast({ title: "Recording stopped and saved", type: "success" });
+                            setSelectedProgram(null);
+                            refetchRecordings();
+                          }).catch(() => addToast({ title: "Failed to stop recording", type: "error" }));
+                        } else {
+                          fetch(getApiUrl(`/api/recordings/${rec.id}`), { method: 'DELETE', headers: getApiHeaders() }).then(() => {
+                            addToast({ title: "Recording cancelled", type: "success" });
+                            setSelectedProgram(null);
+                            refetchRecordings();
+                          }).catch(() => addToast({ title: "Failed to cancel", type: "error" }));
+                        }
                       }
                     }}
                     className="px-5 py-2 rounded-lg font-medium bg-red-600/20 hover:bg-red-600/30 text-red-500 transition-colors cursor-pointer border border-red-500/50"
                   >
-                    Cancel Recording
+                    {recordings?.find(r => (r.epg_id === selectedProgram.entry.id || (r.channel_id === selectedProgram.channel.id && new Date(r.start_time).getTime() === new Date(selectedProgram.entry.start_time).getTime())) && r.status === 'recording') ? 'Stop Recording' : 'Cancel Scheduled'}
                   </button>
                 ) : (
                   <button 

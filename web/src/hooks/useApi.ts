@@ -1,13 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { getApiUrl, getApiHeaders } from "../lib/api";
 
-export function useApi<T>(url: string) {
+export function useApi<T>(url: string, pollIntervalMs?: number) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    setLoading(true);
     setError(null);
     try {
       const res = await fetch(getApiUrl(url), { headers: getApiHeaders() });
@@ -23,7 +22,12 @@ export function useApi<T>(url: string) {
 
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+    
+    if (pollIntervalMs) {
+      const timer = setInterval(fetchData, pollIntervalMs);
+      return () => clearInterval(timer);
+    }
+  }, [fetchData, pollIntervalMs]);
 
   return { data, loading, error, refetch: fetchData };
 }
