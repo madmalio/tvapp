@@ -107,17 +107,6 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 		return
 	}
 
-	if _, err := os.Stat(outputFile); os.IsNotExist(err) {
-		log.Printf("[dvr] recording file %s was not created (recording may have been stopped too quickly)", outputFile)
-		db.UpdateRecordingStatus(r.ID, "failed", "File not created")
-		return
-	}
-
-	// Package the HLS chunks into a gapless MP4 using the concat demuxer.
-	// This natively rewrites PTS timestamps across ad gaps, resulting in a perfect MP4 without transcoding!
-	mp4Filename := fmt.Sprintf("%s_%d.mp4", safeTitle, r.ID)
-	mp4OutputFile := filepath.Join(dvrPath, mp4Filename)
-
 	dir := filepath.Dir(outputFile)
 	base := strings.TrimSuffix(filepath.Base(outputFile), filepath.Ext(outputFile))
 	
@@ -133,6 +122,18 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 			}
 		}
 	}
+
+	_, errM3u8 := os.Stat(outputFile)
+	if len(tsFiles) == 0 && os.IsNotExist(errM3u8) {
+		log.Printf("[dvr] recording file(s) for %s were not created (recording may have been stopped too quickly)", base)
+		db.UpdateRecordingStatus(r.ID, "failed", "Files not created")
+		return
+	}
+
+	// Package the HLS chunks into a gapless MP4 using the concat demuxer.
+	// This natively rewrites PTS timestamps across ad gaps, resulting in a perfect MP4 without transcoding!
+	mp4Filename := fmt.Sprintf("%s_%d.mp4", safeTitle, r.ID)
+	mp4OutputFile := filepath.Join(dvrPath, mp4Filename)
 	
 	if len(tsFiles) > 0 {
 		concatPath := filepath.Join(dir, fmt.Sprintf("concat_%d.txt", r.ID))
