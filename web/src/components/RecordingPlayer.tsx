@@ -23,6 +23,7 @@ export default function RecordingPlayer() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [buffered, setBuffered] = useState(0);
   const isDragging = useRef(false);
 
   const { data: recording, error } = useApi<Recording>(`/api/recordings/${id}`);
@@ -88,6 +89,20 @@ export default function RecordingPlayer() {
       }
       setDuration(video.duration || 0);
     };
+    const onProgress = () => {
+      if (video.buffered.length > 0) {
+        let maxBuf = 0;
+        for (let i = 0; i < video.buffered.length; i++) {
+          if (video.buffered.start(i) <= video.currentTime && video.buffered.end(i) >= video.currentTime) {
+            maxBuf = video.buffered.end(i);
+          }
+        }
+        if (maxBuf === 0) {
+          maxBuf = video.buffered.end(video.buffered.length - 1);
+        }
+        setBuffered(maxBuf);
+      }
+    };
 
     video.addEventListener("play", onPlay);
     video.addEventListener("pause", onPause);
@@ -97,6 +112,7 @@ export default function RecordingPlayer() {
     video.addEventListener("seeked", onPlaying);
     video.addEventListener("volumechange", onVolumeChange);
     video.addEventListener("timeupdate", onTimeUpdate);
+    video.addEventListener("progress", onProgress);
 
     return () => {
       video.removeEventListener("play", onPlay);
@@ -107,6 +123,7 @@ export default function RecordingPlayer() {
       video.removeEventListener("seeked", onPlaying);
       video.removeEventListener("volumechange", onVolumeChange);
       video.removeEventListener("timeupdate", onTimeUpdate);
+      video.removeEventListener("progress", onProgress);
     };
   }, []);
 
@@ -171,6 +188,7 @@ export default function RecordingPlayer() {
   }
 
   const progressPercent = duration > 0 ? (progress / duration) * 100 : 0;
+  const bufferedPercent = duration > 0 ? (buffered / duration) * 100 : 0;
   const volumePercent = isMuted ? 0 : volume * 100;
 
     return (
@@ -214,7 +232,8 @@ export default function RecordingPlayer() {
           <span className="text-white text-xs font-medium w-12 text-right">{formatTime(progress)}</span>
           <div className="flex-1 relative flex items-center h-4 group/scrubber cursor-pointer">
             <div className="absolute inset-x-0 h-1.5 bg-neutral-600 rounded-full overflow-hidden">
-              <div className="h-full bg-blue-500" style={{ width: `${progressPercent}%` }} />
+              <div className="absolute top-0 bottom-0 left-0 bg-neutral-400 transition-all duration-300" style={{ width: `${bufferedPercent}%` }} />
+              <div className="absolute top-0 bottom-0 left-0 bg-blue-500" style={{ width: `${progressPercent}%` }} />
             </div>
             <div 
               className="absolute w-3 h-3 bg-white rounded-full shadow scale-0 group-hover/scrubber:scale-125 transition-transform pointer-events-none" 
