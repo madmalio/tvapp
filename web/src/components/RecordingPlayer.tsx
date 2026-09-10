@@ -22,6 +22,7 @@ export default function RecordingPlayer() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
+  const isDragging = useRef(false);
 
   const { data: recording, error } = useApi<Recording>(`/api/recordings/${id}`);
 
@@ -79,7 +80,9 @@ export default function RecordingPlayer() {
       setVolume(video.volume);
     };
     const onTimeUpdate = () => {
-      setProgress(video.currentTime);
+      if (!isDragging.current) {
+        setProgress(video.currentTime);
+      }
       setDuration(video.duration || 0);
     };
 
@@ -120,9 +123,18 @@ export default function RecordingPlayer() {
     }
   };
 
+  const handleSeekStart = () => {
+    isDragging.current = true;
+  };
+
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setProgress(Number(e.target.value));
+  };
+
+  const handleSeekEnd = () => {
+    isDragging.current = false;
     if (videoRef.current) {
-      videoRef.current.currentTime = Number(e.target.value);
+      videoRef.current.currentTime = progress;
     }
   };
 
@@ -195,7 +207,11 @@ export default function RecordingPlayer() {
               min={0}
               max={duration || 100}
               value={progress}
+              onMouseDown={handleSeekStart}
+              onTouchStart={handleSeekStart}
               onChange={handleSeek}
+              onMouseUp={handleSeekEnd}
+              onTouchEnd={handleSeekEnd}
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
             />
           </div>
