@@ -44,9 +44,12 @@ export default function RecordingPlayer() {
       video.play().catch(console.error);
     } else if (Hls.isSupported()) {
       hls = new Hls({ 
-        maxBufferLength: 30, 
-        maxMaxBufferLength: 60,
-        startPosition: 0 // Always start VOD recordings from the beginning
+        maxBufferLength: 60,       // Try to keep 60 seconds ahead
+        maxMaxBufferLength: 600,   // Let it buffer up to 10 minutes ahead if bandwidth allows!
+        maxBufferSize: 60 * 1024 * 1024, // Allow up to 60MB of video in memory for instant local scrubbing
+        progressive: true,         // Render chunks immediately as they download instead of waiting for the full chunk
+        enableWorker: true,        // Use a background web worker to handle the TS-to-MP4 conversion faster
+        startPosition: 0           // Always start VOD recordings from the beginning
       });
       hls.loadSource(manifestUrl);
       hls.attachMedia(video);
