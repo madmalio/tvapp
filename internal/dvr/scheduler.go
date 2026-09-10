@@ -173,39 +173,6 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 		} else {
 			log.Printf("[dvr] HDHomeRun transcode failed: %v, out: %s", err, string(out))
 		}
-	} else if len(tsFiles) > 0 {
-		concatPath := filepath.Join(dir, fmt.Sprintf("concat_%d.txt", r.ID))
-		defer os.Remove(concatPath)
-		var concatContent strings.Builder
-		for _, ts := range tsFiles {
-			// Because chunks are padded (e.g. _00001.ts), ReadDir's lexicographical sort is correct.
-			concatContent.WriteString(fmt.Sprintf("file '%s'\n", ts))
-		}
-		
-		// Write the ffmpeg concat list for the MP4 generation
-		os.WriteFile(concatPath, []byte(concatContent.String()), 0644)
-		
-		db.UpdateRecordingStatus(r.ID, "processing", "")
-		log.Printf("[dvr] concatenating %d chunks into MP4 to eliminate PTS gaps...", len(tsFiles))
-		
-		cmd := exec.Command("ffmpeg", "-f", "concat", "-safe", "0", "-i", concatPath, "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", mp4OutputFile)
-		out, err := cmd.CombinedOutput()
-		
-		if err == nil {
-			log.Printf("[dvr] instant concat successful for %s", mp4OutputFile)
-			
-			// COMMENTED OUT: Preserve the raw HLS chunks and .m3u8 playlist for Android TV!
-			// for _, f := range files {
-			// 	if strings.HasPrefix(f.Name(), base) && !strings.HasSuffix(f.Name(), ".mp4") {
-			// 		os.Remove(filepath.Join(dir, f.Name()))
-			// 	}
-			// }
-			
-			outputFile = mp4OutputFile
-		} else {
-			log.Printf("[dvr] concat failed: %v, out: %s", err, string(out))
-			// If it fails, we safely fall back to serving the .m3u8 playlist natively
-		}
 	}
 
 	db.UpdateRecordingStatus(r.ID, "completed", outputFile)
