@@ -310,7 +310,7 @@ export default function EpgGrid() {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center p-4 md:pl-20 pb-16 md:pb-0 bg-neutral-950 h-full">
+      <div className="flex-1 flex items-center justify-center p-4 md:pl-16 pb-16 md:pb-0 bg-neutral-950 h-full">
         <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
       </div>
     );
@@ -318,7 +318,7 @@ export default function EpgGrid() {
 
   if (channels.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center p-4 md:pl-20 pb-16 md:pb-0 bg-neutral-950 h-full">
+      <div className="flex-1 flex items-center justify-center p-4 md:pl-16 pb-16 md:pb-0 bg-neutral-950 h-full">
         <div className="bg-neutral-900/50 backdrop-blur-xl border border-neutral-800 rounded-2xl p-8 max-w-md text-center mx-4">
           <h2 className="text-2xl font-bold mb-3 text-white">No Guide Data</h2>
           <p className="text-neutral-400 mb-6 text-sm sm:text-base">
@@ -355,11 +355,11 @@ export default function EpgGrid() {
   };
 
   return (
-    <div className="flex-1 flex flex-col md:pl-20 pb-16 md:pb-0 bg-neutral-950 overflow-hidden h-full relative">
+    <div className="flex-1 flex flex-col md:pl-16 pb-16 md:pb-0 bg-neutral-950 overflow-hidden h-full relative">
       
       {/* Top Source Tabs */}
       {sources && sources.length > 1 && (
-        <div className="absolute top-0 left-0 right-0 z-50 px-4 sm:px-6 md:pl-24 md:pr-6 py-3 md:py-4 flex gap-2 overflow-x-auto no-scrollbar">
+        <div className="absolute top-0 left-0 right-0 z-50 px-4 sm:px-6 md:pl-20 md:pr-6 py-3 md:py-4 flex gap-2 overflow-x-auto no-scrollbar">
           {sources.map(src => (
             <button
               key={src.id}
@@ -383,7 +383,7 @@ export default function EpgGrid() {
       )}
 
       {/* Main UI Header with Categories */}
-      <div className={`shrink-0 border-b border-neutral-800/80 bg-neutral-900/40 backdrop-blur-md px-4 sm:px-6 md:pl-24 md:pr-6 z-40 relative flex items-center overflow-x-auto no-scrollbar shadow-md ${sources && sources.length > 1 ? 'mt-14 md:mt-16' : ''}`}>
+      <div className={`shrink-0 border-b border-neutral-800/80 bg-neutral-900/40 backdrop-blur-md px-4 sm:px-6 md:pl-20 md:pr-6 z-40 relative flex items-center overflow-x-auto no-scrollbar shadow-md ${sources && sources.length > 1 ? 'mt-14 md:mt-16' : ''}`}>
         <div className="py-4 md:py-6 shrink-0 flex flex-col gap-3 md:gap-4 w-full">
           <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Live TV Guide</h2>
           <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
