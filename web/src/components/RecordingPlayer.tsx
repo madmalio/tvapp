@@ -50,6 +50,8 @@ export default function RecordingPlayer() {
         maxBufferLength: 120,      // Try to aggressively keep 2 minutes ahead at all times
         maxMaxBufferLength: 1800,  // Allow it to buffer up to 30 minutes ahead!
         maxBufferSize: 150 * 1024 * 1024, // Push the browser's RAM limit to ~150MB for maximum local scrubbing
+        backBufferLength: 90,      // VERY IMPORTANT: Only keep 90 seconds behind you so we free up memory for the forward buffer!
+        abrEwmaDefaultEstimate: 50000000, // Assume a 50Mbps connection so it never throttles chunk downloads
         progressive: true,         // Render chunks immediately as they download instead of waiting for the full chunk
         enableWorker: true,        // Use a background web worker to handle the TS-to-MP4 conversion faster
         startPosition: 0           // Always start VOD recordings from the beginning
