@@ -122,3 +122,8 @@ tvapp/
 - AES-128 key files must be 16 bytes; proxy returns them as-is from CDN
 - Session tokens rotate unpredictably (2-10 min); variant cache stall detection + lazy M3U refresh handle this
 - `#EXT-X-DISCONTINUITY` triggers proxy to re-resolve from master
+
+## Experimental Branches & Scripts
+
+- **Hardware Acceleration (eature/hw-accel)**: We built a complete hardware acceleration framework for Intel VAAPI and QuickSync (QSV) designed to offload transcoding for live streams and DVR saves. However, because older Intel chips (like the Skylake HD 530) suffer from missing VPP support or driver crashes on Proxmox, and because true cross-platform software rendering is more bulletproof for the user experience, we parked this work. Do not merge into main without explicit confirmation.
+- **Pluto TV Ad Tester (catch_ad.py)**: A Python script we wrote to fetch live Pluto TV variant playlists to analyze their #EXT-X-DISCONTINUITY and ad-insertion tags. This was used to debug stream stalling issues.

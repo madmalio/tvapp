@@ -111,3 +111,5 @@ scp .\bin\tvapp-linux mark@192.168.4.143:~/tvapp/tvapp
 2. **Favorites** - The `favorites` table exists in the schema but no UI
 3. **Channel search** - Text search for channels/programs
 4. **Native HLS on Safari** - Detect Safari and use `<video src>` directly (no proxy needed, bypasses CORS)
+5. **Hardware Acceleration**: A full hardware acceleration framework for Intel VAAPI and QuickSync (QSV) is implemented but parked in the eature/hw-accel branch. It works, but due to Proxmox driver constraints on older Intel chips (like Skylake HD 530 crashing on VPP scaling), we reverted to the bulletproof universal software encoder for the main branch.
+6. **Pluto TV Ad Tester**: We used a script catch_ad.py to fetch variant playlists and analyze #EXT-X-DISCONTINUITY and ad tags to debug stream stalling issues.

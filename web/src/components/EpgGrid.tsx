@@ -28,6 +28,7 @@ type EPGEntry = {
   channel_id: number;
   title: string;
   description: string;
+  poster_url?: string;
   start_time: string;
   end_time: string;
 };
@@ -456,13 +457,26 @@ export default function EpgGrid() {
       {selectedProgram && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-opacity" onClick={() => setSelectedProgram(null)}>
           <div className="bg-neutral-900 border border-neutral-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b border-neutral-800">
-              <div className="flex items-center gap-4 mb-4">
+            
+            {/* Modal Hero Thumbnail */}
+            {(selectedProgram.entry.poster_url || selectedProgram.channel.logo_url) && (
+              <div className="relative w-full h-48 sm:h-56 bg-neutral-950 flex-shrink-0">
+                <img 
+                  src={selectedProgram.entry.poster_url || selectedProgram.channel.logo_url} 
+                  alt={selectedProgram.entry.title} 
+                  className={`absolute inset-0 w-full h-full ${selectedProgram.entry.poster_url ? 'object-cover object-top opacity-80' : 'object-contain p-8 opacity-40'}`}
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 via-neutral-900/40 to-transparent" />
+              </div>
+            )}
+
+            <div className="p-6 border-b border-neutral-800 relative">
+              <div className="flex items-start gap-4 mb-4">
                 {selectedProgram.channel.logo_url && (
-                  <img src={selectedProgram.channel.logo_url} alt={selectedProgram.channel.name} className="w-16 h-12 object-contain bg-white/5 rounded shrink-0" />
+                  <img src={selectedProgram.channel.logo_url} alt={selectedProgram.channel.name} className="w-16 h-12 object-contain bg-neutral-950/80 rounded shrink-0 shadow-lg ring-1 ring-white/10" />
                 )}
                 <div>
-                  <h3 className="text-xl font-bold text-white leading-tight">{selectedProgram.entry.title}</h3>
+                  <h3 className="text-xl sm:text-2xl font-bold text-white leading-tight drop-shadow-md">{selectedProgram.entry.title}</h3>
                   <p className="text-blue-400 font-medium text-sm mt-1">
                     {new Date(selectedProgram.entry.start_time).toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})} - {new Date(selectedProgram.entry.end_time).toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})}
                   </p>
