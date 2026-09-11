@@ -131,3 +131,7 @@ tvapp/
 ## Future Documentation
 
 - **README Hardware Recommendations**: When generating the final README or user documentation in the future, ensure there is a clear section outlining hardware requirements (CPU, RAM). Specifically, highlight the difference between IPTV (M3U) passthrough (which runs on a potato) vs. hardware tuners like HDHomeRun. HDHomeRun requires heavy on-the-fly software transcoding (libx264). Users running HDHomeRun streams should be recommended a minimum of 4 CPU cores (or hardware acceleration support) to handle live viewing and DVR post-processing smoothly without buffering. Avoid recommending weak ARM chips like Raspberry Pi 4 for HDHomeRun workloads.
+
+## Future TV Client App
+
+- **Simplified UI**: When building the dedicated TV client app (e.g. Android TV / Apple TV / smart TVs), ensure the UI is kept as clean and simple as possible. Specifically, **hide the batch delete feature** in the DVR/Recordings section. Complex bulk-management actions should be reserved for the web dashboard, keeping the 10-foot TV experience uncluttered.
