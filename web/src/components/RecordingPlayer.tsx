@@ -25,8 +25,52 @@ export default function RecordingPlayer() {
   const [duration, setDuration] = useState(0);
   const [buffered, setBuffered] = useState(0);
   const isDragging = useRef(false);
+  const [preparingDownloadId, setPreparingDownloadId] = useState<string | null>(null);
 
   const { data: recording, error } = useApi<Recording>(`/api/recordings/${id}`);
+
+  const handleDownloadRecording = async (e: React.MouseEvent, filePath: string) => {
+    e.stopPropagation();
+    
+    if (filePath.endsWith('.mp4')) {
+      window.location.href = getApiUrl(`/${filePath}`);
+      return;
+    }
+
+    setPreparingDownloadId(id || null);
+    
+    try {
+      const res = await fetch(getApiUrl(`/api/recordings/${id}/package`), { method: "POST" });
+      if (!res.ok) throw new Error("Failed to start packaging");
+      
+      const data = await res.json();
+      const taskId = data.taskId;
+
+      const poll = setInterval(async () => {
+        try {
+          const statusRes = await fetch(getApiUrl(`/api/tasks/${taskId}`));
+          const statusData = await statusRes.json();
+          if (statusData.status === "completed") {
+            clearInterval(poll);
+            setPreparingDownloadId(null);
+            window.location.href = getApiUrl(`/api/tasks/${taskId}/download`);
+          } else if (statusData.status === "failed") {
+            clearInterval(poll);
+            setPreparingDownloadId(null);
+            alert("Failed to prepare download: " + statusData.error);
+          }
+        } catch (err) {
+          clearInterval(poll);
+          setPreparingDownloadId(null);
+          alert("Failed to prepare download");
+        }
+      }, 1000);
+    } catch (err) {
+      console.error(err);
+      setPreparingDownloadId(null);
+      alert("Failed to start download");
+    }
+  };
 
   useEffect(() => {
     if (!recording?.file_path) return;
@@ -218,9 +262,9 @@ export default function RecordingPlayer() {
           {recording?.title || "Loading..."}
         </h2>
         {recording?.file_path ? (
-          <a href={getApiUrl(`/${recording.file_path}`)} download className="p-2 text-white hover:bg-white/20 rounded-full transition-colors cursor-pointer">
+          <button onClick={(e) => handleDownloadRecording(e, recording.file_path!)} className="p-2 text-white hover:bg-white/20 rounded-full transition-colors cursor-pointer">
             <Download className="w-6 h-6" />
-          </a>
+          </button>
         ) : (
           <div className="w-10"></div>
         )}
@@ -292,6 +336,19 @@ export default function RecordingPlayer() {
           </button>
         </div>
       </div>
+      
+      {/* Preparing Download Modal */}
+      {preparingDownloadId !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl flex flex-col items-center text-center">
+            <Loader2 className="w-12 h-12 text-blue-500 animate-spin mb-4" />
+            <h2 className="text-xl font-semibold text-white mb-2">Preparing Download...</h2>
+            <p className="text-neutral-400 text-sm">
+              We are packaging the recording into an MP4 file. This usually takes 10 to 30 seconds depending on the length of the recording.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

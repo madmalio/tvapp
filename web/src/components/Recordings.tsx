@@ -31,6 +31,7 @@ export default function Recordings() {
   const [showDeleteModal, setShowDeleteModal] = useState<number | null>(null);
   const [showBatchDeleteModal, setShowBatchDeleteModal] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [preparingDownloadId, setPreparingDownloadId] = useState<number | null>(null);
 
   // Toasts
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -49,6 +50,50 @@ export default function Recordings() {
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  const handleDownloadRecording = async (e: React.MouseEvent, id: number, filePath: string) => {
+    e.stopPropagation();
+    
+    // If it's already an MP4, bypass packaging and download instantly
+    if (filePath.endsWith('.mp4')) {
+      window.location.href = getApiUrl(`/${filePath}`);
+      return;
+    }
+
+    setPreparingDownloadId(id);
+    
+    try {
+      const res = await fetch(getApiUrl(`/api/recordings/${id}/package`), { method: "POST", headers: getApiHeaders() });
+      if (!res.ok) throw new Error("Failed to start packaging");
+      
+      const data = await res.json();
+      const taskId = data.taskId;
+
+      const poll = setInterval(async () => {
+        try {
+          const statusRes = await fetch(getApiUrl(`/api/tasks/${taskId}`));
+          const statusData = await statusRes.json();
+          if (statusData.status === "completed") {
+            clearInterval(poll);
+            setPreparingDownloadId(null);
+            window.location.href = getApiUrl(`/api/tasks/${taskId}/download`);
+          } else if (statusData.status === "failed") {
+            clearInterval(poll);
+            setPreparingDownloadId(null);
+            addToast({ title: "Failed to prepare download", message: statusData.error, type: "error" });
+          }
+        } catch (err) {
+          clearInterval(poll);
+          setPreparingDownloadId(null);
+          addToast({ title: "Failed to prepare download", type: "error" });
+        }
+      }, 1000);
+    } catch (err) {
+      console.error(err);
+      setPreparingDownloadId(null);
+      addToast({ title: "Failed to start download", type: "error" });
+    }
+  };
 
   const deleteRecording = async (id: number) => {
     try {
@@ -217,15 +262,13 @@ export default function Recordings() {
                       >
                         <Play className="w-5 h-5" />
                       </button>
-                      <a 
-                        href={getApiUrl(`/${r.file_path}`)}
-                        onClick={(e) => e.stopPropagation()}
-                        download
+                      <button 
+                        onClick={(e) => handleDownloadRecording(e, r.id, r.file_path!)}
                         className="p-2 bg-green-600/20 text-green-400 hover:bg-green-600 hover:text-white rounded-lg transition-colors cursor-pointer flex items-center justify-center"
                         title="Download Recording"
                       >
                         <Download className="w-5 h-5" />
-                      </a>
+                      </button>
                     </>
                   )}
                   {r.status === "recording" && (
@@ -316,6 +359,19 @@ export default function Recordings() {
                 {activeTab === 'scheduled' ? 'Cancel Selected' : 'Delete Selected'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Preparing Download Modal */}
+      {preparingDownloadId !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl flex flex-col items-center text-center">
+            <Loader2 className="w-12 h-12 text-blue-500 animate-spin mb-4" />
+            <h2 className="text-xl font-semibold text-white mb-2">Preparing Download...</h2>
+            <p className="text-neutral-400 text-sm">
+              We are packaging the recording into an MP4 file. This usually takes 10 to 30 seconds depending on the length of the recording.
+            </p>
           </div>
         </div>
       )}

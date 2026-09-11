@@ -151,14 +151,19 @@ func StartRecording(r db.RecordingRow, start, end time.Time) {
 			"-fflags", "+genpts",
 			"-ss", "2", // Input seeking is required to actually skip the broken frames before decoding starts
 			"-i", outputFile,
+			"-map", "0:v:0", // First video track
+			"-map", "0:a:0", // First audio track (for AAC stereo downmix)
+			"-map", "0:a:0", // First audio track AGAIN (for original 5.1 copy)
 			"-async", "1", // Use classic async to stretch/squeeze audio to match video timestamps
 			"-fps_mode", "cfr",
 			"-c:v", "libx264",
 			"-preset", "veryfast", // Slower than ultrafast, but compresses much better (smaller file, lower bitrate)
 			"-crf", "25", // Slightly lower quality to reduce bitrate
-			"-vf", "bwdif,scale=-2:720", // Deinterlace AND scale down to 720p to prevent browser playback pausing
-			"-c:a", "aac",
-			"-b:a", "256k",
+			"-vf", "bwdif,scale=-2:720,format=yuv420p", // Deinterlace, scale down to 720p, ensure max compatibility
+			"-c:a:0", "aac",
+			"-ac:a:0", "2", // Force stereo downmix on Track 1 for Web/Windows Media Player
+			"-b:a:0", "256k",
+			"-c:a:1", "copy", // Copy the original 5.1 AC-3 bitstream as Track 2 for Home Theater/VLC
 			"-movflags", "+faststart",
 			mp4OutputFile,
 		}
