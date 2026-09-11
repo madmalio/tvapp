@@ -195,13 +195,14 @@ export default function VideoPlayer() {
   };
   
   const { data: recordings, refetch: refetchRecordings } = useApi<any[]>('/api/recordings', 10000);
-  const [activeRecordingId, setActiveRecordingId] = useState<number | null>(null);
+  const [optimisticOverride, setOptimisticOverride] = useState<number | null | undefined>(undefined);
 
-  useEffect(() => {
-    if (!channel || !recordings) return;
+  const activeRecordingId = useMemo(() => {
+    if (optimisticOverride !== undefined) return optimisticOverride;
+    if (!channel || !recordings) return null;
     const active = recordings.find(r => r.channel_id === channel.id && r.status === 'recording');
-    setActiveRecordingId(active ? active.id : null);
-  }, [channel, recordings]);
+    return active ? active.id : null;
+  }, [channel, recordings, optimisticOverride]);
 
   const { playChannel, cameraPipEnabled, pipCamera, setPipCamera } = usePlayer();
   const [showCameraMenu, setShowCameraMenu] = useState(false);
@@ -310,12 +311,14 @@ export default function VideoPlayer() {
     if (activeRecordingId) {
       try {
         const idToStop = activeRecordingId;
-        setActiveRecordingId(null); // Optimistic UI update instantly
+        setOptimisticOverride(null); // Optimistic UI update instantly
         await fetch(getApiUrl(`/api/recordings/${idToStop}/stop`), { method: 'POST', headers: getApiHeaders() });
-        refetchRecordings();
+        await refetchRecordings();
         showToast("Recording stopped and saved");
       } catch (err) {
         console.error(err);
+      } finally {
+        setOptimisticOverride(undefined);
       }
     } else {
       const entry = epgMap[channel.id];
@@ -323,6 +326,7 @@ export default function VideoPlayer() {
       const endTime = entry ? entry.end_time : new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
       
       try {
+        setOptimisticOverride(-1); // Fake positive ID for optimistic load
         const res = await fetch(getApiUrl('/api/recordings'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...getApiHeaders() as Record<string, string> },
@@ -335,12 +339,14 @@ export default function VideoPlayer() {
           })
         });
         const data = await res.json();
-        setActiveRecordingId(data.id || null); // Optimistic UI update instantly
-        refetchRecordings();
+        setOptimisticOverride(data.id || null);
+        await refetchRecordings();
         showToast("Recording started");
       } catch (err) {
         console.error(err);
         showToast("Failed to start recording");
+      } finally {
+        setOptimisticOverride(undefined);
       }
     }
   }, [channel, activeRecordingId, epgMap, programTitle, refetchRecordings]);
@@ -397,7 +403,7 @@ export default function VideoPlayer() {
     positionRef.current = 0;
     setIsAtLiveEdge(true);
     setIsPlaying(true);
-    setActiveRecordingId(null);
+    setOptimisticOverride(undefined);
     
     if (allChannels.length > 0) {
       const ch = allChannels.find(c => c.id === parseInt(channelId));
