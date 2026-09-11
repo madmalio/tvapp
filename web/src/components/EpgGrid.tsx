@@ -460,13 +460,24 @@ export default function EpgGrid() {
             
             {/* Modal Hero Thumbnail */}
             {(selectedProgram.entry.poster_url || selectedProgram.channel.logo_url) && (
-              <div className="relative w-full h-48 sm:h-56 bg-neutral-950 flex-shrink-0">
+              <div className="relative w-full h-48 sm:h-64 bg-neutral-950 flex-shrink-0 overflow-hidden">
+                {/* Blurred Ambient Background */}
                 <img 
                   src={selectedProgram.entry.poster_url || selectedProgram.channel.logo_url} 
-                  alt={selectedProgram.entry.title} 
-                  className={`absolute inset-0 w-full h-full ${selectedProgram.entry.poster_url ? 'object-cover object-top opacity-80' : 'object-contain p-8 opacity-40'}`}
+                  alt="" 
+                  className="absolute inset-0 w-full h-full object-cover opacity-30 blur-2xl scale-110"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 via-neutral-900/40 to-transparent" />
+                
+                {/* Uncropped Foreground Poster */}
+                <div className="absolute inset-0 p-4 pb-8 flex items-center justify-center">
+                  <img 
+                    src={selectedProgram.entry.poster_url || selectedProgram.channel.logo_url} 
+                    alt={selectedProgram.entry.title} 
+                    className={`w-full h-full ${selectedProgram.entry.poster_url ? 'object-contain drop-shadow-2xl rounded-md' : 'object-contain p-4 opacity-60'}`}
+                  />
+                </div>
+                
+                <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 via-neutral-900/20 to-transparent pointer-events-none" />
               </div>
             )}
 
