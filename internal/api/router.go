@@ -43,6 +43,9 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 	
 	// HLS streaming proxy
 	r.Get("/api/proxy", proxyStreamHandler)
+	
+	// Internal Tuner Proxy (for FFmpeg loopback only)
+	r.Get("/api/internal/tuner", internalTunerProxyHandler)
 
 	// Protected Routes
 	r.Group(func(r chi.Router) {
@@ -59,7 +62,6 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 		r.Post("/api/system/ping", clientPing)
 		r.Get("/api/speedtest", speedtestHandler)
 		r.Get("/api/system/speedtest", speedtestHandler) // Alias for UI
-		r.Get("/api/internal/tuner", internalTunerProxyHandler)
 		r.Post("/api/stream/start", startStreamHandler)
 		r.Post("/api/stream/stop/{id}", stopStreamHandler)
 		r.Delete("/api/stream/stop/{id}", stopStreamHandler)
@@ -742,6 +744,11 @@ func getEpgHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func internalTunerProxyHandler(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(r.RemoteAddr, "127.0.0.1:") && !strings.HasPrefix(r.RemoteAddr, "[::1]:") {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
 	url := r.URL.Query().Get("url")
 	if url == "" {
 		http.Error(w, "missing url", http.StatusBadRequest)
