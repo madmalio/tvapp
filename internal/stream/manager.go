@@ -36,7 +36,7 @@ type Session struct {
 
 var (
 	sessions        sync.Map
-	cleanupInterval = 60 * time.Second
+	cleanupInterval = 5 * time.Second
 	streamJar       http.CookieJar
 )
 
@@ -486,8 +486,15 @@ func cleanupLoop() {
 			s.mu.Lock()
 			last := s.LastUsed
 			stopped := s.stopped
+			tunerType := s.TunerType
 			s.mu.Unlock()
-			if !stopped && now.Sub(last) > 120*time.Second {
+			
+			timeout := 120 * time.Second
+			if tunerType == "hdhomerun" {
+				timeout = 15 * time.Second
+			}
+
+			if !stopped && now.Sub(last) > timeout {
 				log.Printf("[stream] cleanup: %s (idle %v)", key.(string), now.Sub(last))
 				Stop(key.(string))
 			}

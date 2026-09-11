@@ -57,12 +57,18 @@ export function useSpeedTest() {
         
         globalSpeedMbps = mbps;
         
-        // We no longer automatically set the quality based on speedtest.
-        // The speedtest measures LAN speed (Browser -> Server), not WAN speed (Server -> Internet),
-        // which causes it to incorrectly default to 1080p on slow internet connections.
+        // Re-enabled auto-quality selection primarily for remote HDHomeRun streaming
         if (!sessionStorage.getItem('userQualitySet')) {
-            globalPreferredQuality = 'source';
-            sessionStorage.setItem('preferredQuality', 'source');
+            if (mbps > 8) {
+              globalPreferredQuality = '1080p_high';
+            } else if (mbps > 5) {
+              globalPreferredQuality = '720p_high';
+            } else if (mbps > 2.5) {
+              globalPreferredQuality = '480p_high';
+            } else {
+              globalPreferredQuality = '360p_low';
+            }
+            sessionStorage.setItem('preferredQuality', globalPreferredQuality);
         } else {
             globalPreferredQuality = (sessionStorage.getItem('preferredQuality') as StreamQuality) || 'source';
         }
