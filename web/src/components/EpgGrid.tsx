@@ -456,11 +456,11 @@ export default function EpgGrid() {
       {/* Program Details Modal */}
       {selectedProgram && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-opacity" onClick={() => setSelectedProgram(null)}>
-          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex flex-col" onClick={e => e.stopPropagation()}>
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl w-full max-w-3xl overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex flex-col sm:flex-row" onClick={e => e.stopPropagation()}>
             
-            {/* Modal Hero Thumbnail */}
+            {/* Modal Hero Thumbnail (Left side on desktop, Top on mobile) */}
             {(selectedProgram.entry.poster_url || selectedProgram.channel.logo_url) && (
-              <div className="relative w-full h-48 sm:h-64 bg-neutral-950 flex-shrink-0 overflow-hidden">
+              <div className="relative w-full h-48 sm:h-auto sm:w-2/5 md:w-1/3 bg-neutral-950 flex-shrink-0 overflow-hidden border-b sm:border-b-0 sm:border-r border-neutral-800">
                 {/* Blurred Ambient Background */}
                 <img 
                   src={selectedProgram.entry.poster_url || selectedProgram.channel.logo_url} 
@@ -469,34 +469,33 @@ export default function EpgGrid() {
                 />
                 
                 {/* Uncropped Foreground Poster */}
-                <div className="absolute inset-0 p-4 pb-8 flex items-center justify-center">
+                <div className="absolute inset-0 p-6 flex items-center justify-center">
                   <img 
                     src={selectedProgram.entry.poster_url || selectedProgram.channel.logo_url} 
                     alt={selectedProgram.entry.title} 
-                    className={`w-full h-full ${selectedProgram.entry.poster_url ? 'object-contain drop-shadow-2xl rounded-md' : 'object-contain p-4 opacity-60'}`}
+                    className={`w-full h-full ${selectedProgram.entry.poster_url ? 'object-contain drop-shadow-2xl rounded-md' : 'object-contain opacity-60'}`}
                   />
                 </div>
-                
-                <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 via-neutral-900/20 to-transparent pointer-events-none" />
               </div>
             )}
 
-            <div className="p-6 border-b border-neutral-800 relative">
-              <div className="flex items-start gap-4 mb-4">
-                {selectedProgram.channel.logo_url && (
-                  <img src={selectedProgram.channel.logo_url} alt={selectedProgram.channel.name} className="w-16 h-12 object-contain bg-neutral-950/80 rounded shrink-0 shadow-lg ring-1 ring-white/10" />
-                )}
-                <div>
-                  <h3 className="text-xl sm:text-2xl font-bold text-white leading-tight drop-shadow-md">{selectedProgram.entry.title}</h3>
-                  <p className="text-blue-400 font-medium text-sm mt-1">
-                    {new Date(selectedProgram.entry.start_time).toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})} - {new Date(selectedProgram.entry.end_time).toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})}
-                  </p>
+            <div className="flex flex-col flex-1 min-w-0">
+              <div className="p-6 border-b border-neutral-800 relative flex-1">
+                <div className="flex items-start gap-4 mb-4">
+                  {selectedProgram.channel.logo_url && (
+                    <img src={selectedProgram.channel.logo_url} alt={selectedProgram.channel.name} className="w-16 h-12 object-contain bg-neutral-950/80 rounded shrink-0 shadow-lg ring-1 ring-white/10" />
+                  )}
+                  <div className="min-w-0">
+                    <h3 className="text-xl sm:text-2xl font-bold text-white leading-tight drop-shadow-md truncate whitespace-normal break-words">{selectedProgram.entry.title}</h3>
+                    <p className="text-blue-400 font-medium text-sm mt-1">
+                      {new Date(selectedProgram.entry.start_time).toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})} - {new Date(selectedProgram.entry.end_time).toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})}
+                    </p>
+                  </div>
                 </div>
+                <p className="text-neutral-300 text-sm leading-relaxed max-h-48 overflow-y-auto custom-scrollbar pr-2">
+                  {selectedProgram.entry.description || "No description available for this program."}
+                </p>
               </div>
-              <p className="text-neutral-300 text-sm leading-relaxed max-h-48 overflow-y-auto custom-scrollbar pr-2">
-                {selectedProgram.entry.description || "No description available for this program."}
-              </p>
-            </div>
             <div className="p-4 bg-neutral-950 flex justify-end gap-3">
               <button 
                 onClick={() => setSelectedProgram(null)}
@@ -575,6 +574,7 @@ export default function EpgGrid() {
                   Catch Up Unavailable
                 </button>
               )}
+            </div>
             </div>
           </div>
         </div>
