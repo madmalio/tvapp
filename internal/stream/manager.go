@@ -116,6 +116,31 @@ func Start(rawURL string, tunerType string, quality string) (*Session, error) {
 		return existingSess, nil
 	}
 
+	// For hardware-limited tuners like HDHomeRun, if a new quality is requested for the SAME channel,
+	// aggressively kill the old quality session immediately to free up the tuner instantly.
+	if tunerType == "hdhomerun" {
+		sessions.Range(func(key, value interface{}) bool {
+			s := value.(*Session)
+			s.mu.Lock()
+			if s.RawURL == rawURL && s.Quality != quality && !s.stopped {
+				if s.stopTimer != nil {
+					s.stopTimer.Stop()
+					s.stopTimer = nil
+				}
+				s.stopped = true
+				s.mu.Unlock()
+
+				sessions.Delete(s.ID)
+				close(s.stopCh)
+				os.RemoveAll(s.Dir)
+				log.Printf("[stream] forcefully killed old quality %s session to free tuner for %s", s.Quality, rawURL)
+			} else {
+				s.mu.Unlock()
+			}
+			return true
+		})
+	}
+
 	id := fmt.Sprintf("stream_%d", time.Now().UnixNano())
 	dir := filepath.Join(os.TempDir(), "tvapp", id)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -425,10 +450,16 @@ func Stop(id string) {
 	}
 
 	// Schedule shutdown after a 6-second grace period to allow seamless transitions between views
+	// EXCEPTION: HDHomeRun tuners are limited hardware resources, free them instantly!
+	gracePeriod := 6 * time.Second
+	if s.TunerType == "hdhomerun" {
+		gracePeriod = 0 * time.Second
+	}
+
 	if s.stopTimer != nil {
 		s.stopTimer.Stop()
 	}
-	s.stopTimer = time.AfterFunc(6*time.Second, func() {
+	s.stopTimer = time.AfterFunc(gracePeriod, func() {
 		s.mu.Lock()
 		if s.refCount > 0 || s.stopped {
 			s.mu.Unlock()
