@@ -195,10 +195,12 @@ export default function VideoPlayer() {
   };
   
   const { data: recordings, refetch: refetchRecordings } = useApi<any[]>('/api/recordings', 10000);
-  const activeRecordingId = useMemo(() => {
-    if (!channel || !recordings) return null;
+  const [activeRecordingId, setActiveRecordingId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!channel || !recordings) return;
     const active = recordings.find(r => r.channel_id === channel.id && r.status === 'recording');
-    return active ? active.id : null;
+    setActiveRecordingId(active ? active.id : null);
   }, [channel, recordings]);
 
   const { playChannel, cameraPipEnabled, pipCamera, setPipCamera } = usePlayer();
@@ -307,7 +309,9 @@ export default function VideoPlayer() {
     
     if (activeRecordingId) {
       try {
-        await fetch(getApiUrl(`/api/recordings/${activeRecordingId}/stop`), { method: 'POST', headers: getApiHeaders() });
+        const idToStop = activeRecordingId;
+        setActiveRecordingId(null); // Optimistic UI update instantly
+        await fetch(getApiUrl(`/api/recordings/${idToStop}/stop`), { method: 'POST', headers: getApiHeaders() });
         refetchRecordings();
         showToast("Recording stopped and saved");
       } catch (err) {
@@ -319,7 +323,7 @@ export default function VideoPlayer() {
       const endTime = entry ? entry.end_time : new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
       
       try {
-        await fetch(getApiUrl('/api/recordings'), {
+        const res = await fetch(getApiUrl('/api/recordings'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...getApiHeaders() as Record<string, string> },
           body: JSON.stringify({
@@ -330,6 +334,8 @@ export default function VideoPlayer() {
             end_time: endTime
           })
         });
+        const data = await res.json();
+        setActiveRecordingId(data.id || null); // Optimistic UI update instantly
         refetchRecordings();
         showToast("Recording started");
       } catch (err) {
@@ -391,6 +397,7 @@ export default function VideoPlayer() {
     positionRef.current = 0;
     setIsAtLiveEdge(true);
     setIsPlaying(true);
+    setActiveRecordingId(null);
     
     if (allChannels.length > 0) {
       const ch = allChannels.find(c => c.id === parseInt(channelId));
@@ -830,12 +837,12 @@ export default function VideoPlayer() {
                 >
                   {activeRecordingId ? (
                     <>
-                      <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>
-                      Stop
+                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)] shrink-0"></span>
+                      Stop Rec
                     </>
                   ) : (
                     <>
-                      <span className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex items-center justify-center text-sm sm:text-base leading-none font-light mb-0.5">+</span>
+                      <span className="w-2 h-2 rounded-full border border-neutral-400 group-hover:border-white opacity-80 shrink-0 transition-colors"></span>
                       Record
                     </>
                   )}
