@@ -102,9 +102,9 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 	r.Get("/recordings/download/{id}", downloadRecordingHandler)
 	
 	// Packaging API
-	r.Post("/recordings/{id}/package", packageRecordingHandler)
-	r.Get("/tasks/{id}", getTaskStatusHandler)
-	r.Get("/tasks/{id}/download", downloadTaskHandler)
+	r.Post("/api/recordings/{id}/package", packageRecordingHandler)
+	r.Get("/api/tasks/{id}", getTaskStatusHandler)
+	r.Get("/api/tasks/{id}/download", downloadTaskHandler)
 
 	fileServer := http.FileServer(http.FS(distFS))
 	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
