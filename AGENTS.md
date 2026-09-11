@@ -127,3 +127,7 @@ tvapp/
 
 - **Hardware Acceleration (eature/hw-accel)**: We built a complete hardware acceleration framework for Intel VAAPI and QuickSync (QSV) designed to offload transcoding for live streams and DVR saves. However, because older Intel chips (like the Skylake HD 530) suffer from missing VPP support or driver crashes on Proxmox, and because true cross-platform software rendering is more bulletproof for the user experience, we parked this work. Do not merge into main without explicit confirmation.
 - **Pluto TV Ad Tester (catch_ad.py)**: A Python script we wrote to fetch live Pluto TV variant playlists to analyze their #EXT-X-DISCONTINUITY and ad-insertion tags. This was used to debug stream stalling issues.
+
+## Future Documentation
+
+- **README Hardware Recommendations**: When generating the final README or user documentation in the future, ensure there is a clear section outlining hardware requirements (CPU, RAM). Specifically, highlight the difference between IPTV (M3U) passthrough (which runs on a potato) vs. hardware tuners like HDHomeRun. HDHomeRun requires heavy on-the-fly software transcoding (libx264). Users running HDHomeRun streams should be recommended a minimum of 4 CPU cores (or hardware acceleration support) to handle live viewing and DVR post-processing smoothly without buffering. Avoid recommending weak ARM chips like Raspberry Pi 4 for HDHomeRun workloads.
