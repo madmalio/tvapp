@@ -257,7 +257,8 @@ export default function Recordings() {
                 </div>
               </div>
             );
-          })}
+          })
+          )}
         </div>
       </div>
 
