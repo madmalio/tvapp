@@ -194,7 +194,13 @@ export default function VideoPlayer() {
     setTimeout(() => setToastMessage(null), 3000);
   };
   
-  const [activeRecordingId, setActiveRecordingId] = useState<number | null>(null);
+  const { data: recordings, refetch: refetchRecordings } = useApi<any[]>('/api/recordings', 10000);
+  const activeRecordingId = useMemo(() => {
+    if (!channel || !recordings) return null;
+    const active = recordings.find(r => r.channel_id === channel.id && r.status === 'recording');
+    return active ? active.id : null;
+  }, [channel, recordings]);
+
   const { playChannel, cameraPipEnabled, pipCamera, setPipCamera } = usePlayer();
   const [showCameraMenu, setShowCameraMenu] = useState(false);
   const { data: sources } = useApi<CameraInfo[]>("/api/sources");
@@ -302,7 +308,7 @@ export default function VideoPlayer() {
     if (activeRecordingId) {
       try {
         await fetch(getApiUrl(`/api/recordings/${activeRecordingId}/stop`), { method: 'POST', headers: getApiHeaders() });
-        setActiveRecordingId(null);
+        refetchRecordings();
         showToast("Recording stopped and saved");
       } catch (err) {
         console.error(err);
@@ -313,7 +319,7 @@ export default function VideoPlayer() {
       const endTime = entry ? entry.end_time : new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
       
       try {
-        const res = await fetch(getApiUrl('/api/recordings'), {
+        await fetch(getApiUrl('/api/recordings'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...getApiHeaders() as Record<string, string> },
           body: JSON.stringify({
@@ -324,22 +330,14 @@ export default function VideoPlayer() {
             end_time: endTime
           })
         });
-        const data = await res.json();
-        setActiveRecordingId(data.id || null);
+        refetchRecordings();
         showToast("Recording started");
-        
-        const timeRemaining = new Date(endTime).getTime() - Date.now();
-        if (timeRemaining > 0) {
-          setTimeout(() => {
-            setActiveRecordingId(current => current === data.id ? null : current);
-          }, timeRemaining);
-        }
       } catch (err) {
         console.error(err);
         showToast("Failed to start recording");
       }
     }
-  }, [channel, activeRecordingId, epgMap, programTitle]);
+  }, [channel, activeRecordingId, epgMap, programTitle, refetchRecordings]);
 
   const handleMouseMove = useCallback(() => {
     setShowOverlay(true);
@@ -393,7 +391,6 @@ export default function VideoPlayer() {
     positionRef.current = 0;
     setIsAtLiveEdge(true);
     setIsPlaying(true);
-    setActiveRecordingId(null);
     
     if (allChannels.length > 0) {
       const ch = allChannels.find(c => c.id === parseInt(channelId));
