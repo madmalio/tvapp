@@ -29,6 +29,8 @@ export default function Recordings() {
   const { data: recordings, refetch } = useApi<Recording[]>("/api/recordings", 5000);
   const [activeTab, setActiveTab] = useState<"library" | "scheduled">("library");
   const [showDeleteModal, setShowDeleteModal] = useState<number | null>(null);
+  const [showBatchDeleteModal, setShowBatchDeleteModal] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   // Toasts
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -53,11 +55,43 @@ export default function Recordings() {
       await fetch(getApiUrl(`/api/recordings/${id}`), { method: "DELETE", headers: getApiHeaders() });
       refetch();
       addToast({ title: "Recording Deleted", type: "success" });
+      setSelectedIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
     } catch (err) {
       console.error(err);
       addToast({ title: "Failed to delete recording", type: "error" });
     }
     setShowDeleteModal(null);
+  };
+
+  const batchDeleteRecordings = async () => {
+    let successCount = 0;
+    for (const id of selectedIds) {
+      try {
+        await fetch(getApiUrl(`/api/recordings/${id}`), { method: "DELETE", headers: getApiHeaders() });
+        successCount++;
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    
+    refetch();
+    if (successCount === selectedIds.size) {
+      addToast({ title: `Successfully deleted ${successCount} recordings`, type: "success" });
+    } else {
+      addToast({ title: `Deleted ${successCount}/${selectedIds.size} recordings`, type: "error" });
+    }
+    
+    setSelectedIds(new Set());
+    setShowBatchDeleteModal(false);
+  };
+
+  const handleTabChange = (tab: "library" | "scheduled") => {
+    setActiveTab(tab);
+    setSelectedIds(new Set());
   };
 
   const filtered = recordings?.filter(r => 
@@ -74,15 +108,15 @@ export default function Recordings() {
       <div className="w-full">
         <h1 className="text-3xl font-bold text-white mb-6">Recordings</h1>
         
-        <div className="flex gap-4 mb-6 border-b border-neutral-800 pb-2">
+        <div className="flex gap-4 mb-4 border-b border-neutral-800 pb-2">
           <button
-            onClick={() => setActiveTab("library")}
+            onClick={() => handleTabChange("library")}
             className={`pb-2 px-2 font-medium transition-colors ${activeTab === "library" ? "text-blue-500 border-b-2 border-blue-500" : "text-neutral-400 hover:text-white"}`}
           >
             Library
           </button>
           <button
-            onClick={() => setActiveTab("scheduled")}
+            onClick={() => handleTabChange("scheduled")}
             className={`pb-2 px-2 font-medium transition-colors flex items-center gap-2 ${activeTab === "scheduled" ? "text-blue-500 border-b-2 border-blue-500" : "text-neutral-400 hover:text-white"}`}
           >
             Scheduled
@@ -94,6 +128,36 @@ export default function Recordings() {
           </button>
         </div>
 
+        {filtered.length > 0 && (
+          <div className="flex items-center justify-between mb-4 px-2">
+            <label className="flex items-center gap-2 cursor-pointer text-sm text-neutral-300 hover:text-white transition-colors">
+              <input
+                type="checkbox"
+                checked={selectedIds.size === filtered.length && filtered.length > 0}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelectedIds(new Set(filtered.map(r => r.id)));
+                  } else {
+                    setSelectedIds(new Set());
+                  }
+                }}
+                className="w-4 h-4 rounded bg-neutral-800 border-neutral-700 text-blue-500 focus:ring-blue-500/50 focus:ring-offset-neutral-900 cursor-pointer"
+              />
+              Select All
+            </label>
+
+            {selectedIds.size > 0 && (
+              <button
+                onClick={() => setShowBatchDeleteModal(true)}
+                className="flex items-center gap-1.5 text-sm font-medium text-red-500 hover:text-red-400 transition-colors bg-red-500/10 hover:bg-red-500/20 px-3 py-1.5 rounded-lg border border-red-500/20"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete Selected ({selectedIds.size})
+              </button>
+            )}
+          </div>
+        )}
+
         <div className="space-y-4">
           {filtered.length === 0 ? (
             <div className="text-center p-8 bg-neutral-900/50 rounded-xl border border-neutral-800">
@@ -102,6 +166,19 @@ export default function Recordings() {
           ) : (
             filtered.map(r => (
               <div key={r.id} className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-4 shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(r.id)}
+                    onChange={(e) => {
+                      const newSet = new Set(selectedIds);
+                      if (e.target.checked) newSet.add(r.id);
+                      else newSet.delete(r.id);
+                      setSelectedIds(newSet);
+                    }}
+                    className="w-4 h-4 rounded bg-neutral-800 border-neutral-700 text-blue-500 focus:ring-blue-500/50 focus:ring-offset-neutral-900 cursor-pointer"
+                  />
+                </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <h3 className="font-bold text-white text-lg truncate">{r.title}</h3>
@@ -194,6 +271,35 @@ export default function Recordings() {
                 className="bg-red-600 hover:bg-red-500 text-white text-xs sm:text-sm font-medium px-4 sm:px-6 py-2 rounded-lg transition-all cursor-pointer shadow-md"
               >
                 {recordings?.find(r => r.id === showDeleteModal)?.status === 'scheduled' ? 'Cancel Recording' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Batch Delete Confirmation Modal */}
+      {showBatchDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 sm:p-6 max-w-md w-full shadow-2xl">
+            <h2 className="text-lg sm:text-xl font-semibold text-white mb-2">
+              {activeTab === 'scheduled' ? 'Cancel' : 'Delete'} {selectedIds.size} Recordings?
+            </h2>
+            <p className="text-neutral-400 mb-5 text-xs sm:text-sm">
+              Are you sure you want to {activeTab === 'scheduled' ? 'cancel' : 'delete'} the {selectedIds.size} selected recordings?
+              {activeTab !== 'scheduled' && " Recorded files will be permanently removed from disk."} This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2.5">
+              <button
+                onClick={() => setShowBatchDeleteModal(false)}
+                className="px-3.5 py-2 text-xs sm:text-sm font-medium text-neutral-400 hover:text-white transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={batchDeleteRecordings}
+                className="bg-red-600 hover:bg-red-500 text-white text-xs sm:text-sm font-medium px-4 sm:px-6 py-2 rounded-lg transition-all cursor-pointer shadow-md"
+              >
+                {activeTab === 'scheduled' ? 'Cancel Selected' : 'Delete Selected'}
               </button>
             </div>
           </div>
