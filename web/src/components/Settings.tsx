@@ -1075,16 +1075,18 @@ export default function Settings() {
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
               {(profiles || []).filter(p => isAdmin || p.id === activeProfileId).map(profile => (
                 <div key={profile.id} className="bg-neutral-800/50 backdrop-blur-md border border-neutral-700/50 rounded-2xl p-4 flex flex-col items-center gap-4 relative overflow-hidden group">
-                  {profile.is_admin && (
-                    <div className="absolute top-3 left-3 bg-blue-500/20 text-blue-400 text-[10px] font-bold px-2 py-0.5 rounded border border-blue-500/30">
-                      ADMIN
-                    </div>
-                  )}
-                  {profile.has_pin && (
-                    <div className="absolute top-3 left-3 bg-amber-500/20 text-amber-400 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-500/30">
-                      LOCKED
-                    </div>
-                  )}
+                  <div className="absolute top-3 left-3 flex items-center gap-2">
+                    {profile.is_admin && (
+                      <div className="bg-blue-500/20 text-blue-400 text-[10px] font-bold px-2 py-0.5 rounded border border-blue-500/30">
+                        ADMIN
+                      </div>
+                    )}
+                    {profile.has_pin && (
+                      <div className="bg-amber-500/20 text-amber-400 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-500/30">
+                        LOCKED
+                      </div>
+                    )}
+                  </div>
                   
                   <div className="w-20 h-20 rounded-full overflow-hidden bg-neutral-900 border-2 border-neutral-700">
                     <img src={profile.avatar_url} alt={profile.name} className="w-full h-full object-cover" />
