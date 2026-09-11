@@ -821,13 +821,11 @@ export default function VideoPlayer() {
                 <span className={`w-2 h-2 rounded-full ${isAtLiveEdge ? 'bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.8)] animate-pulse' : 'bg-neutral-600'}`}></span>
                 <span className="font-bold text-[11px] sm:text-sm tracking-wider">LIVE</span>
               </button>
-            </div>
 
-            <div className="flex items-center gap-0.5 sm:gap-2 md:gap-4 shrink-0">
               {channel && (
                 <button
                   onClick={handleRecordClick}
-                  className={`pointer-events-auto flex items-center gap-1.5 sm:gap-2 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-full font-medium text-[10px] sm:text-xs tracking-wide transition-all border shrink-0 focus:outline-none cursor-pointer mr-1 sm:mr-2 ${
+                  className={`ml-1 sm:ml-2 pointer-events-auto flex items-center gap-1.5 sm:gap-2 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-full font-medium text-[10px] sm:text-xs tracking-wide transition-all border shrink-0 focus:outline-none cursor-pointer ${
                     activeRecordingId 
                       ? 'bg-red-500/20 text-red-500 border-red-500/50 hover:bg-red-500/30' 
                       : 'bg-neutral-800/80 text-neutral-300 border-transparent hover:bg-neutral-700 hover:text-white'
@@ -846,7 +844,9 @@ export default function VideoPlayer() {
                   )}
                 </button>
               )}
+            </div>
 
+            <div className="flex items-center gap-0.5 sm:gap-2 md:gap-4 shrink-0">
               <div className="flex items-center gap-1 sm:gap-3 group/volume">
                 <button 
                   onClick={(e) => { e.stopPropagation(); setIsMuted(!isMuted); }}
