@@ -313,11 +313,15 @@ export default function VideoPlayer() {
         const idToStop = activeRecordingId;
         setOptimisticOverride(null); // Optimistic UI update instantly
         await fetch(getApiUrl(`/api/recordings/${idToStop}/stop`), { method: 'POST', headers: getApiHeaders() });
-        await refetchRecordings();
         showToast("Recording stopped and saved");
+        
+        // Wait for backend FFmpeg to gracefully close and update SQLite before re-syncing
+        setTimeout(async () => {
+          await refetchRecordings();
+          setOptimisticOverride(undefined);
+        }, 1500);
       } catch (err) {
         console.error(err);
-      } finally {
         setOptimisticOverride(undefined);
       }
     } else {
@@ -340,12 +344,15 @@ export default function VideoPlayer() {
         });
         const data = await res.json();
         setOptimisticOverride(data.id || null);
-        await refetchRecordings();
         showToast("Recording started");
+        
+        setTimeout(async () => {
+          await refetchRecordings();
+          setOptimisticOverride(undefined);
+        }, 1500);
       } catch (err) {
         console.error(err);
         showToast("Failed to start recording");
-      } finally {
         setOptimisticOverride(undefined);
       }
     }
