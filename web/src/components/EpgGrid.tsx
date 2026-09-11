@@ -508,7 +508,7 @@ export default function EpgGrid() {
                   to={`/player/${selectedProgram.channel.id}`} 
                   state={{ from: '/guide' }} 
                   onClick={() => lockToLandscape()}
-                  className="px-5 py-2 rounded-lg font-medium bg-neutral-800 hover:bg-neutral-700 text-white transition-colors cursor-pointer border border-neutral-700"
+                  className="px-5 py-2 rounded-lg font-medium bg-neutral-800 hover:bg-neutral-700 text-white transition-colors cursor-pointer border border-neutral-700 text-center"
                 >
                   Watch Live
                 </Link>
