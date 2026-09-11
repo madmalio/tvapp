@@ -776,7 +776,7 @@ export default function VideoPlayer() {
           showOverlay ? "opacity-100" : "opacity-0"
         }`}
       >
-        <div className="h-auto min-h-[4.5rem] sm:h-44 bg-gradient-to-b from-black/90 via-black/40 to-transparent flex items-start justify-between w-full p-3 sm:p-6 md:p-8 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
+        <div className="h-auto min-h-[4.5rem] sm:h-44 bg-gradient-to-b from-black/90 via-black/40 to-transparent flex items-start p-3 sm:p-6 md:p-8 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
           {channel && (
             <div className="pointer-events-auto flex items-center gap-2 sm:gap-4 max-w-full min-w-0" onClick={(e) => e.stopPropagation()}>
               <button 
@@ -799,29 +799,6 @@ export default function VideoPlayer() {
                 </h2>
               </div>
             </div>
-          )}
-
-          {channel && (
-            <button
-              onClick={handleRecordClick}
-              className={`pointer-events-auto flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 rounded-full font-medium text-xs sm:text-sm tracking-wide shadow-lg transition-all border shrink-0 focus:outline-none cursor-pointer ${
-                activeRecordingId 
-                  ? 'bg-red-500/20 text-red-500 border-red-500/50 hover:bg-red-500/30' 
-                  : 'bg-neutral-900/50 text-white border-white/20 hover:bg-white hover:text-black backdrop-blur-md'
-              }`}
-            >
-              {activeRecordingId ? (
-                <>
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>
-                  Stop Recording
-                </>
-              ) : (
-                <>
-                  <span className="w-4 h-4 flex items-center justify-center text-lg leading-none font-light">+</span>
-                  Record
-                </>
-              )}
-            </button>
           )}
         </div>
 
@@ -847,6 +824,29 @@ export default function VideoPlayer() {
             </div>
 
             <div className="flex items-center gap-0.5 sm:gap-2 md:gap-4 shrink-0">
+              {channel && (
+                <button
+                  onClick={handleRecordClick}
+                  className={`pointer-events-auto flex items-center gap-1.5 sm:gap-2 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-full font-medium text-[10px] sm:text-xs tracking-wide transition-all border shrink-0 focus:outline-none cursor-pointer mr-1 sm:mr-2 ${
+                    activeRecordingId 
+                      ? 'bg-red-500/20 text-red-500 border-red-500/50 hover:bg-red-500/30' 
+                      : 'bg-neutral-800/80 text-neutral-300 border-transparent hover:bg-neutral-700 hover:text-white'
+                  }`}
+                >
+                  {activeRecordingId ? (
+                    <>
+                      <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>
+                      Stop
+                    </>
+                  ) : (
+                    <>
+                      <span className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex items-center justify-center text-sm sm:text-base leading-none font-light mb-0.5">+</span>
+                      Record
+                    </>
+                  )}
+                </button>
+              )}
+
               <div className="flex items-center gap-1 sm:gap-3 group/volume">
                 <button 
                   onClick={(e) => { e.stopPropagation(); setIsMuted(!isMuted); }}
