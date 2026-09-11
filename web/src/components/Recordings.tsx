@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Trash2, Play, AlertCircle, CheckCircle2, Loader2, X, Square, Download } from "lucide-react";
+import { Trash2, Play, AlertCircle, CheckCircle2, Loader2, X, Square, Download, Check, ListChecks } from "lucide-react";
 import { useApi } from "../hooks/useApi";
 import { getApiUrl, getApiHeaders } from "../lib/api";
 
@@ -129,27 +129,27 @@ export default function Recordings() {
         </div>
 
         {filtered.length > 0 && (
-          <div className="flex items-center justify-between mb-4 px-2">
-            <label className="flex items-center gap-2 cursor-pointer text-sm text-neutral-300 hover:text-white transition-colors">
-              <input
-                type="checkbox"
-                checked={selectedIds.size === filtered.length && filtered.length > 0}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    setSelectedIds(new Set(filtered.map(r => r.id)));
-                  } else {
-                    setSelectedIds(new Set());
-                  }
-                }}
-                className="w-4 h-4 rounded bg-neutral-800 border-neutral-700 text-blue-500 focus:ring-blue-500/50 focus:ring-offset-neutral-900 cursor-pointer"
-              />
+          <div className="flex items-center justify-between mb-4">
+            <button
+              onClick={() => {
+                if (selectedIds.size === filtered.length) {
+                  setSelectedIds(new Set());
+                } else {
+                  setSelectedIds(new Set(filtered.map(r => r.id)));
+                }
+              }}
+              className="flex items-center gap-2 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer text-neutral-400 hover:text-white hover:bg-neutral-800/50"
+            >
+              <div className={`w-4 h-4 rounded-[4px] border flex items-center justify-center transition-all ${selectedIds.size === filtered.length ? 'bg-blue-600 border-blue-600' : 'border-neutral-600 bg-transparent'}`}>
+                {selectedIds.size === filtered.length && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+              </div>
               Select All
-            </label>
+            </button>
 
             {selectedIds.size > 0 && (
               <button
                 onClick={() => setShowBatchDeleteModal(true)}
-                className="flex items-center gap-1.5 text-sm font-medium text-red-500 hover:text-red-400 transition-colors bg-red-500/10 hover:bg-red-500/20 px-3 py-1.5 rounded-lg border border-red-500/20"
+                className="flex items-center gap-2 text-sm font-medium text-red-400 hover:text-white transition-colors bg-red-500/10 hover:bg-red-600 px-3 py-1.5 rounded-lg border border-red-500/20 hover:border-red-600 cursor-pointer"
               >
                 <Trash2 className="w-4 h-4" />
                 Delete Selected ({selectedIds.size})
@@ -164,22 +164,33 @@ export default function Recordings() {
               <p className="text-neutral-400">No {activeTab} recordings found.</p>
             </div>
           ) : (
-            filtered.map(r => (
-              <div key={r.id} className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex items-center justify-between gap-4">
-                <div className="flex items-center gap-4 shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(r.id)}
-                    onChange={(e) => {
-                      const newSet = new Set(selectedIds);
-                      if (e.target.checked) newSet.add(r.id);
-                      else newSet.delete(r.id);
-                      setSelectedIds(newSet);
-                    }}
-                    className="w-4 h-4 rounded bg-neutral-800 border-neutral-700 text-blue-500 focus:ring-blue-500/50 focus:ring-offset-neutral-900 cursor-pointer"
-                  />
-                </div>
-                <div className="flex-1 min-w-0">
+            filtered.map(r => {
+              const isSelected = selectedIds.has(r.id);
+              return (
+                <div 
+                  key={r.id} 
+                  onClick={() => {
+                    const newSet = new Set(selectedIds);
+                    if (isSelected) newSet.delete(r.id);
+                    else newSet.add(r.id);
+                    setSelectedIds(newSet);
+                  }}
+                  className={`group rounded-xl p-4 flex items-center justify-between gap-4 transition-all border cursor-pointer ${
+                    isSelected 
+                      ? 'bg-blue-900/20 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.1)]' 
+                      : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700 hover:bg-neutral-800/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-4 shrink-0">
+                    <div className={`w-5 h-5 rounded-[6px] border-2 flex items-center justify-center transition-all ${
+                      isSelected 
+                        ? 'bg-blue-600 border-blue-600' 
+                        : 'border-neutral-600 group-hover:border-neutral-500 bg-transparent'
+                    }`}>
+                      {isSelected && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
+                    </div>
+                  </div>
+                  <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <h3 className="font-bold text-white text-lg truncate">{r.title}</h3>
                     {r.status === "recording" && (
@@ -200,7 +211,7 @@ export default function Recordings() {
                   {r.status === "completed" && r.file_path && (
                     <>
                       <button 
-                        onClick={() => navigate(`/player/recording/${r.id}`)}
+                        onClick={(e) => { e.stopPropagation(); navigate(`/player/recording/${r.id}`); }}
                         className="p-2 bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white rounded-lg transition-colors cursor-pointer"
                         title="Play Recording"
                       >
@@ -208,6 +219,7 @@ export default function Recordings() {
                       </button>
                       <a 
                         href={getApiUrl(`/${r.file_path}`)}
+                        onClick={(e) => e.stopPropagation()}
                         download
                         className="p-2 bg-green-600/20 text-green-400 hover:bg-green-600 hover:text-white rounded-lg transition-colors cursor-pointer flex items-center justify-center"
                         title="Download Recording"
@@ -218,7 +230,8 @@ export default function Recordings() {
                   )}
                   {r.status === "recording" && (
                     <button 
-                      onClick={async () => {
+                      onClick={async (e) => {
+                        e.stopPropagation();
                         try {
                           await fetch(getApiUrl(`/api/recordings/${r.id}/stop`), { method: "POST", headers: getApiHeaders() });
                           refetch();
@@ -235,7 +248,7 @@ export default function Recordings() {
                     </button>
                   )}
                   <button 
-                    onClick={() => setShowDeleteModal(r.id)}
+                    onClick={(e) => { e.stopPropagation(); setShowDeleteModal(r.id); }}
                     className="p-2 bg-red-600/20 text-red-400 hover:bg-red-600 hover:text-white rounded-lg transition-colors cursor-pointer"
                     title={activeTab === "scheduled" ? "Cancel Recording" : "Delete Recording"}
                   >
@@ -243,8 +256,8 @@ export default function Recordings() {
                   </button>
                 </div>
               </div>
-            ))
-          )}
+            );
+          })}
         </div>
       </div>
 
