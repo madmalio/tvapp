@@ -33,7 +33,12 @@ export default function RecordingPlayer() {
     e.stopPropagation();
     
     if (filePath.endsWith('.mp4')) {
-      window.location.href = getApiUrl(`/${filePath}`);
+      const a = document.createElement('a');
+      a.href = getApiUrl(`/${filePath}`);
+      a.download = filePath.split('/').pop() || 'recording.mp4';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
       return;
     }
 

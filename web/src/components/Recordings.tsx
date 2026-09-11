@@ -56,7 +56,12 @@ export default function Recordings() {
     
     // If it's already an MP4, bypass packaging and download instantly
     if (filePath.endsWith('.mp4')) {
-      window.location.href = getApiUrl(`/${filePath}`);
+      const a = document.createElement('a');
+      a.href = getApiUrl(`/${filePath}`);
+      a.download = filePath.split('/').pop() || 'recording.mp4';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
       return;
     }
 

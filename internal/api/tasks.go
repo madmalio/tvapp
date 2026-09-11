@@ -63,8 +63,9 @@ func packageRecordingHandler(w http.ResponseWriter, r *http.Request) {
 	
 tmpDir := filepath.Join(filepath.Dir(rec.FilePath), "tmp")
 	os.MkdirAll(tmpDir, 0755)
-	
-tmpFile := filepath.Join(tmpDir, fmt.Sprintf("download_%d.mp4", id))
+	safeTitle := strings.ReplaceAll(rec.Title, " ", "_")
+	safeTitle = strings.ReplaceAll(safeTitle, "/", "-")
+	tmpFile := filepath.Join(tmpDir, fmt.Sprintf("%s_%d.mp4", safeTitle, id))
 
 	tasksMu.Lock()
 	tasks[taskID] = &PackageTask{
