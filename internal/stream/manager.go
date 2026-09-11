@@ -148,7 +148,9 @@ func Start(rawURL string, tunerType string, quality string) (*Session, error) {
 	}
 
 	streamURL := rawURL
-	if tunerType != "hdhomerun" && tunerType != "rtsp" {
+	if tunerType == "hdhomerun" {
+		streamURL = "http://127.0.0.1:8080/api/internal/tuner?url=" + url.QueryEscape(rawURL)
+	} else if tunerType != "rtsp" {
 		prefetchCookies(rawURL)
 		streamURL = resolveStreamURL(rawURL)
 	}

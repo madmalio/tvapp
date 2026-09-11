@@ -59,6 +59,7 @@ func NewRouter(distFS fs.FS) *chi.Mux {
 		r.Post("/api/system/ping", clientPing)
 		r.Get("/api/speedtest", speedtestHandler)
 		r.Get("/api/system/speedtest", speedtestHandler) // Alias for UI
+		r.Get("/api/internal/tuner", internalTunerProxyHandler)
 		r.Post("/api/stream/start", startStreamHandler)
 		r.Post("/api/stream/stop/{id}", stopStreamHandler)
 		r.Delete("/api/stream/stop/{id}", stopStreamHandler)
@@ -738,6 +739,35 @@ func getEpgHandler(w http.ResponseWriter, r *http.Request) {
 		entries = []db.EPGEntryRow{}
 	}
 	json.NewEncoder(w).Encode(entries)
+}
+
+func internalTunerProxyHandler(w http.ResponseWriter, r *http.Request) {
+	url := r.URL.Query().Get("url")
+	if url == "" {
+		http.Error(w, "missing url", http.StatusBadRequest)
+		return
+	}
+
+	sub, unsubscribe, err := stream.SubscribeTuner(url)
+	if err != nil {
+		http.Error(w, "failed to subscribe", http.StatusInternalServerError)
+		return
+	}
+	defer unsubscribe()
+
+	w.Header().Set("Content-Type", "video/mp2t")
+	w.WriteHeader(http.StatusOK)
+
+	// Stream chunks directly to the HTTP response
+	for chunk := range sub {
+		if _, err := w.Write(chunk); err != nil {
+			// Client disconnected or pipe broken
+			return
+		}
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}
 }
 
 func startStreamHandler(w http.ResponseWriter, r *http.Request) {

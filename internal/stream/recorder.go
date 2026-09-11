@@ -124,6 +124,46 @@ func RecordStream(recordingID int, rawURL string, tunerType string, durationSec 
 		recordingsMutex.Unlock()
 	}()
 
+	if tunerType == "hdhomerun" {
+		log.Printf("[dvr] starting native TunerPool recording for %s (duration %ds)", rawURL, durationSec)
+		
+		sub, unsubscribe, err := SubscribeTuner(rawURL)
+		if err != nil {
+			log.Printf("[dvr] failed to subscribe to tuner: %v", err)
+			return err
+		}
+		defer unsubscribe()
+		
+		f, err := os.Create(outputFile)
+		if err != nil {
+			log.Printf("[dvr] failed to create output file %s: %v", outputFile, err)
+			return err
+		}
+		defer f.Close()
+		
+		timer := time.NewTimer(time.Duration(durationSec) * time.Second)
+		defer timer.Stop()
+		
+		for {
+			select {
+			case <-ctx.Done():
+				log.Printf("[dvr] recording %d stopped manually", recordingID)
+				return nil
+			case <-timer.C:
+				log.Printf("[dvr] recording %d finished (duration reached)", recordingID)
+				return nil
+			case chunk, ok := <-sub:
+				if !ok {
+					log.Printf("[dvr] recording %d tuner closed unexpectedly", recordingID)
+					return fmt.Errorf("tuner stream ended prematurely")
+				}
+				if _, err := f.Write(chunk); err != nil {
+					return fmt.Errorf("write error: %v", err)
+				}
+			}
+		}
+	}
+
 	if tunerType != "hdhomerun" && tunerType != "rtsp" {
 		// Custom Go HLS downloader for IPTV.
 		// Bypasses all FFmpeg crash/gap issues by parsing the playlist ourselves,
