@@ -186,6 +186,21 @@ export default function RecordingPlayer() {
     }
   };
 
+  const handleInteraction = () => {
+    setShowControls(true);
+    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    controlsTimeoutRef.current = setTimeout(() => {
+      setShowControls(false);
+    }, 4000);
+  };
+
+  useEffect(() => {
+    handleInteraction();
+    return () => {
+      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    };
+  }, []);
+
   const toggleMute = () => {
     if (videoRef.current) {
       videoRef.current.muted = !videoRef.current.muted;
@@ -243,40 +258,48 @@ export default function RecordingPlayer() {
   const volumePercent = isMuted ? 0 : volume * 100;
 
     return (
-      <div ref={containerRef} className="fixed inset-0 bg-black z-[100] flex flex-col group">
-        <video
-          ref={videoRef}
-          className="w-full h-full object-contain cursor-pointer"
-          onClick={togglePlay}
-          playsInline
-        />
-        
-        {/* Loading Overlay */}
-        {isBuffering && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <Loader2 className="w-16 h-16 text-white animate-spin drop-shadow-lg opacity-80" />
-          </div>
-        )}
+    <div 
+      ref={containerRef} 
+      className="fixed inset-0 bg-black z-[100] flex flex-col group"
+      onMouseMove={handleInteraction}
+      onTouchStart={handleInteraction}
+      onClick={handleInteraction}
+    >
+      <video
+        ref={videoRef}
+        className="w-full h-full object-contain cursor-pointer"
+        onClick={togglePlay}
+        playsInline
+      />
+      
+      {/* Loading Overlay */}
+      {isBuffering && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <Loader2 className="w-16 h-16 text-white animate-spin drop-shadow-lg opacity-80" />
+        </div>
+      )}
 
-        {/* Top Bar */}
-      <div className="absolute top-0 inset-x-0 p-4 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+      {/* Top Bar */}
+      <div className={`absolute top-0 inset-x-0 p-4 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between transition-opacity duration-300 ${showControls ? "opacity-100" : "opacity-0"}`}>
         <button onClick={() => navigate(-1)} className="p-2 text-white hover:bg-white/20 rounded-full transition-colors cursor-pointer">
           <ArrowLeft className="w-6 h-6" />
         </button>
-        <h2 className="text-white font-semibold shadow-black drop-shadow-md truncate max-w-[60vw]">
-          {recording?.title || "Loading..."}
-        </h2>
-        {recording?.file_path ? (
-          <button onClick={(e) => handleDownloadRecording(e, recording.file_path!)} className="p-2 text-white hover:bg-white/20 rounded-full transition-colors cursor-pointer">
-            <Download className="w-6 h-6" />
-          </button>
-        ) : (
-          <div className="w-10"></div>
-        )}
+        <div className="flex items-center gap-2 sm:gap-4 max-w-full min-w-0 pr-2">
+          <h2 className="text-white font-medium truncate text-sm sm:text-base drop-shadow-md">
+            {recording?.title || "Loading..."}
+          </h2>
+          {recording?.file_path ? (
+            <button onClick={(e) => handleDownloadRecording(e, recording.file_path!)} className="p-2 text-white hover:bg-white/20 rounded-full transition-colors cursor-pointer">
+              <Download className="w-6 h-6" />
+            </button>
+          ) : (
+            <div className="w-10"></div>
+          )}
+        </div>
       </div>
 
       {/* Bottom Controls */}
-      <div className="absolute bottom-0 inset-x-0 p-4 sm:p-6 bg-gradient-to-t from-black/90 to-transparent flex flex-col gap-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+      <div className={`absolute bottom-0 inset-x-0 p-4 sm:p-6 bg-gradient-to-t from-black/90 to-transparent flex flex-col gap-4 transition-opacity duration-300 ${showControls ? "opacity-100" : "opacity-0"}`}>
         
         {/* Progress Bar */}
         <div className="flex items-center gap-3">
