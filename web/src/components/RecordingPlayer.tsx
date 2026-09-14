@@ -280,11 +280,11 @@ export default function RecordingPlayer() {
       )}
 
       {/* Top Bar */}
-      <div className={`absolute top-0 inset-x-0 p-4 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between transition-opacity duration-300 ${showControls ? "opacity-100" : "opacity-0"}`}>
-        <button onClick={() => navigate(-1)} className="p-2 text-white hover:bg-white/20 rounded-full transition-colors cursor-pointer">
+      <div className={`absolute top-0 inset-x-0 p-4 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between transition-opacity duration-300 pointer-events-none ${showControls ? "opacity-100" : "opacity-0"}`}>
+        <button onClick={() => navigate(-1)} className="p-2 text-white hover:bg-white/20 rounded-full transition-colors cursor-pointer pointer-events-auto">
           <ArrowLeft className="w-6 h-6" />
         </button>
-        <div className="flex items-center gap-2 sm:gap-4 max-w-full min-w-0 pr-2">
+        <div className="flex items-center gap-2 sm:gap-4 max-w-full min-w-0 pr-2 pointer-events-auto">
           <h2 className="text-white font-medium truncate text-sm sm:text-base drop-shadow-md">
             {recording?.title || "Loading..."}
           </h2>
@@ -299,10 +299,10 @@ export default function RecordingPlayer() {
       </div>
 
       {/* Bottom Controls */}
-      <div className={`absolute bottom-0 inset-x-0 p-4 sm:p-6 bg-gradient-to-t from-black/90 to-transparent flex flex-col gap-4 transition-opacity duration-300 ${showControls ? "opacity-100" : "opacity-0"}`}>
+      <div className={`absolute bottom-0 inset-x-0 p-4 sm:p-6 bg-gradient-to-t from-black/90 to-transparent flex flex-col gap-4 transition-opacity duration-300 pointer-events-none ${showControls ? "opacity-100" : "opacity-0"}`}>
         
         {/* Progress Bar */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 pointer-events-auto">
           <span className="text-white text-xs font-medium w-12 text-right">{formatTime(progress)}</span>
           <div className="flex-1 relative flex items-center h-4 group/scrubber cursor-pointer">
             <div className="absolute inset-x-0 h-1.5 bg-neutral-600 rounded-full overflow-hidden">
@@ -330,7 +330,7 @@ export default function RecordingPlayer() {
         </div>
 
         {/* Buttons */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between pointer-events-auto">
           <div className="flex items-center gap-4">
             <button onClick={togglePlay} className="p-2 text-white hover:bg-white/20 rounded-full transition-colors cursor-pointer">
               {isPlaying ? <Pause className="w-7 h-7" /> : <Play className="w-7 h-7" />}
