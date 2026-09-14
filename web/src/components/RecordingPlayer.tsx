@@ -4,6 +4,7 @@ import { ArrowLeft, Play, Pause, Volume2, VolumeX, Maximize, Minimize, Download,
 import Hls from "hls.js";
 import { getApiUrl } from "../lib/api";
 import { useApi } from "../hooks/useApi";
+import { lockToLandscape, unlockScreenOrientation } from "../lib/orientation";
 
 type Recording = {
   id: number;
@@ -180,7 +181,9 @@ export default function RecordingPlayer() {
     };
   }, []);
 
-  const togglePlay = () => {
+  const togglePlay = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    lockToLandscape(containerRef.current, videoRef.current);
     if (videoRef.current?.paused) {
       videoRef.current.play();
     } else {
@@ -203,6 +206,26 @@ export default function RecordingPlayer() {
     };
   }, []);
 
+  // Automatic landscape orientation on mount & restore on unmount
+  useEffect(() => {
+    lockToLandscape(containerRef.current, videoRef.current);
+    return () => {
+      unlockScreenOrientation();
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const isFull = !!document.fullscreenElement;
+      setIsFullscreen(isFull);
+      if (isFull) {
+        lockToLandscape(containerRef.current, videoRef.current);
+      }
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
   const toggleMute = () => {
     if (videoRef.current) {
       videoRef.current.muted = !videoRef.current.muted;
@@ -210,11 +233,15 @@ export default function RecordingPlayer() {
   };
 
   const toggleFullscreen = () => {
+    if (!containerRef.current) return;
+    
     if (!document.fullscreenElement) {
+      lockToLandscape(containerRef.current, videoRef.current);
       containerRef.current?.requestFullscreen();
       setIsFullscreen(true);
     } else {
       document.exitFullscreen();
+      unlockScreenOrientation();
       setIsFullscreen(false);
     }
   };
