@@ -26,6 +26,8 @@ export default function RecordingPlayer() {
   const [buffered, setBuffered] = useState(0);
   const isDragging = useRef(false);
   const [preparingDownloadId, setPreparingDownloadId] = useState<string | null>(null);
+  const [showControls, setShowControls] = useState(true);
+  const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data: recording, error } = useApi<Recording>(`/api/recordings/${id}`);
 
